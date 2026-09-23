@@ -16,9 +16,20 @@ import {
 
 test("str keeps strings and falls back for anything else", () => {
   assert.equal(str("سلام"), "سلام");
-  assert.equal(str(42), "");
   assert.equal(str(null, "x"), "x");
   assert.equal(str(undefined, "x"), "x");
+  assert.equal(str({}, "x"), "x");
+});
+
+test("str coerces a numeric id, because Torob sends ids both ways", () => {
+  // Province and city ids come back as numbers, product ids as strings. A
+  // projection that assumed one shape dropped every row of a good response and
+  // reported it as "no provinces exist".
+  assert.equal(str(1), "1");
+  assert.equal(str(0), "0");
+  assert.equal(str(748), "748");
+  assert.equal(str(NaN, "x"), "x");
+  assert.equal(str(Infinity, "x"), "x");
 });
 
 test("num reads numbers and numeric strings, rejects the rest", () => {

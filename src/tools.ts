@@ -6,13 +6,18 @@
 // from a search card would be naming a shop it never checked the reliability
 // of, so the two are deliberately separate calls.
 
-import { SHOP_TYPES, SORTS, SORT_LABELS, type ShopType, type Sort } from "./config.js";
+import { KNOWN_FILTER_SLUGS, SHOP_TYPES, SORTS, SORT_LABELS, type ShopType, type Sort } from "./config.js";
 import { UpstreamError } from "./http.js";
 import { clampLimit, clampPage, num, pageClampNote, str } from "./normalize.js";
 import {
   type ProductCard,
+  categoryChildren,
+  cities,
   productDetails,
+  provinces,
   searchProducts,
+  similarProducts,
+  specialOffers,
   suggestTerms,
 } from "./project.js";
 
@@ -76,17 +81,29 @@ const searchTool: ToolDef = {
     "Search Torob and get compact product cards: the CHEAPEST offer in Toman, the shop behind it, " +
     "image, badges and the product URL. Call torob_suggest first when the wording is vague. " +
     "A card shows one price - the cheapest offer - not every seller; use product_details for those. " +
-    "price_toman 0 or available false means out of stock, not free.",
+    "price_toman 0 or available false means out of stock, not free. " +
+    "Every search returns available_filters: the filter groups this search really accepts, " +
+    "with their slugs - pass those slugs back in `filters` to narrow it down.",
   inputSchema: {
     type: "object",
     properties: {
       query: QUERY,
       page: { type: "number", description: "1-based page, max 50. Deep pages cost an extra upstream request." },
       sort: { type: "string", enum: [...SORTS], description: "popularity (default) = most relevant, price = cheapest first, newest." },
-      category: { type: "string", description: "Torob category id, when the user narrowed to a category." },
+      category: { type: "string", description: "Torob category id, e.g. from suggested_categories or browse_categories." },
       brand: { type: "string", description: "Filter by brand, e.g. 'apple'." },
-      city: { type: "string", description: "Filter by delivery city." },
+      city: { type: "string", description: "Filter by delivery city id, e.g. from list_locations." },
       shop_type: { type: "string", enum: [...SHOP_TYPES], description: "offline = shops with a branch, online = online sellers." },
+      min_price_toman: { type: "number", description: "Only show products at or above this price." },
+      max_price_toman: { type: "number", description: "Only show products at or below this price." },
+      filters: {
+        type: "object",
+        description:
+          "Torob's own filter slugs, from available_filters of an earlier search. " +
+          "Example: {\"price__lt\": \"50000000\", \"available\": \"1\", \"torobpay\": \"1\"}. " +
+          "An unknown slug is refused with the real ones rather than silently ignored.",
+        additionalProperties: { type: "string" },
+      },
       limit: { type: "number", description: "How many cards to return (default 10, max 30)." },
     },
     required: ["query"],
@@ -99,6 +116,35 @@ const searchTool: ToolDef = {
     const shopType = shopTypeOf(args.shop_type);
     const limit = clampLimit(args.limit);
 
+    // The two price bounds are the same upstream filter the user cares about
+    // most, so they get first-class parameters that compile to Torob's slugs.
+    const filters: Record<string, string> = {};
+    const minPrice = num(args.min_price_toman, 0);
+    const maxPrice = num(args.max_price_toman, 0);
+    if (minPrice > 0) filters.price__gt = String(Math.round(minPrice));
+    if (maxPrice > 0) filters.price__lt = String(Math.round(maxPrice));
+    if (minPrice > 0 && maxPrice > 0 && minPrice > maxPrice) {
+      throw usageError(
+        `min_price_toman (${Math.round(minPrice)}) is above max_price_toman (${Math.round(maxPrice)}), so nothing can match.`
+      );
+    }
+    const extra = args.filters;
+    if (extra && typeof extra === "object" && !Array.isArray(extra)) {
+      for (const [k, v] of Object.entries(extra as Record<string, unknown>)) {
+        const slug = str(k).trim();
+        if (!slug) continue;
+        if (!KNOWN_FILTER_SLUGS.includes(slug as (typeof KNOWN_FILTER_SLUGS)[number])) {
+          // Torob ignores an unknown slug and answers with the unfiltered
+          // list, which looks like a filtered result. Refuse instead.
+          throw usageError(
+            `'${slug}' is not a filter this search accepts. Known slugs: ${KNOWN_FILTER_SLUGS.join(", ")}. ` +
+              `Run search_products first and read available_filters for this query - Torob offers different filters per query.`
+          );
+        }
+        filters[slug] = str(v).trim();
+      }
+    }
+
     const found = await searchProducts({
       q: query,
       page,
@@ -107,18 +153,21 @@ const searchTool: ToolDef = {
       brand: str(args.brand).trim() || undefined,
       city: str(args.city).trim() || undefined,
       shopType,
+      filters: Object.keys(filters).length ? filters : undefined,
     });
 
     return {
       query,
       sort,
       sort_meaning: SORT_LABELS[sort],
+      filters_applied: Object.keys(filters).length ? filters : undefined,
       total_matches: found.total,
       page: found.page,
       page_count: found.page_count,
       has_next_page: found.has_next_page,
       price_range_toman: { min: found.min_price_toman, max: found.max_price_toman },
       products: found.products.slice(0, limit),
+      available_filters: found.available_filters,
       ...(found.products.length > limit
         ? { truncated: true, returned: limit, note: `${found.products.length} cards were on this page; showing ${limit}.` }
         : {}),
@@ -355,7 +404,159 @@ const suggestTool: ToolDef = {
   },
 };
 
-export const TOOLS: ToolDef[] = [suggestTool, searchTool, detailsTool, compareTool, bestValueTool];
+// ---------------------------------------------------------------- similar
+
+const similarTool: ToolDef = {
+  name: "similar_products",
+  title: "Products similar to this one",
+  description:
+    "Products Torob considers comparable to the one you pass, cheapest first as cards. " +
+    "This is the 'that one is too expensive, what else?' call. " +
+    "The product must be one this server has already returned - Torob cannot look up a product by id alone, " +
+    "so search_products or product_details must come first.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      prk: { type: "string", description: "A product id from a search_products card or a product_details response." },
+      limit: { type: "number", description: "How many similar products (default 10, max 24)." },
+    },
+    required: ["prk"],
+  },
+  async run(args) {
+    const prk = str(args.prk).trim();
+    if (!prk) throw usageError("similar_products needs a prk this server has already returned.");
+    const limit = clampLimit(args.limit, 10, 24);
+    const products = await similarProducts(prk, limit);
+    return {
+      prk,
+      found: products.length,
+      products,
+      ...(products.length === 0
+        ? { note: "Torob lists no comparable products for this one." }
+        : { note: "Cards carry the cheapest offer only; call product_details on any of them for the seller list." }),
+    };
+  },
+};
+
+// ---------------------------------------------------------------- categories
+
+const categoriesTool: ToolDef = {
+  name: "browse_categories",
+  title: "Browse Torob's category tree",
+  description:
+    "List the sub-categories of a Torob category id, one level at a time. Torob has no 'all categories' call, " +
+    "so this walks the tree: start with id '1' for the top level, then pass a child's id to go deeper. " +
+    "Category ids are also accepted by search_products as `category`, and search results return the ones " +
+    "relevant to that query as suggested_categories.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Parent category id. '1' is the top level." },
+      limit: { type: "number", description: "How many children to return (default 20, max 30)." },
+    },
+    required: ["id"],
+  },
+  async run(args) {
+    const id = str(args.id).trim();
+    if (!id) throw usageError("browse_categories needs a category id. Start with '1' for the top level.");
+    const limit = clampLimit(args.limit, 20, 30);
+    const found = await categoryChildren(id, limit);
+    return {
+      parent_id: found.parent,
+      count: found.categories.length,
+      categories: found.categories,
+      ...(found.has_more
+        ? { has_more: true, note: "There are more children than shown; raise limit to see them all." }
+        : {}),
+      next: found.categories.length
+        ? "Pass any child's id back as `id` to go one level deeper, or as `category` to search_products."
+        : "This category has no children - pass it as `category` to search_products.",
+    };
+  },
+};
+
+// ----------------------------------------------------------------- locations
+
+const locationsTool: ToolDef = {
+  name: "list_locations",
+  title: "List Iranian provinces and cities",
+  description:
+    "List Torob's provinces, or the cities of one province, optionally filtered by name. " +
+    "City ids are what search_products accepts as `city` to see what is deliverable to a place. " +
+    "Without a province this returns the provinces; with one it returns that province's cities.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      province_id: { type: "string", description: "Province id, to list its cities instead of the provinces." },
+      search: { type: "string", description: "Filter by name, e.g. 'تهران'." },
+      limit: { type: "number", description: "How many to return (default 30, max 200)." },
+    },
+    required: [],
+  },
+  async run(args) {
+    const provinceId = str(args.province_id).trim();
+    const search = str(args.search).trim();
+    const limit = clampLimit(args.limit, 30, 200);
+
+    if (!provinceId && search) {
+      // A name with no province is still answerable: search every city.
+      const found = await cities(undefined, search);
+      return { mode: "cities", search, count: Math.min(found.length, limit), cities: found.slice(0, limit) };
+    }
+    if (!provinceId) {
+      const found = await provinces();
+      return { mode: "provinces", count: Math.min(found.length, limit), provinces: found.slice(0, limit) };
+    }
+    const found = await cities(provinceId, search || undefined);
+    return {
+      mode: "cities",
+      province_id: provinceId,
+      ...(search ? { search } : {}),
+      count: Math.min(found.length, limit),
+      cities: found.slice(0, limit),
+      next: "Pass a city id as `city` to search_products to see what is deliverable there.",
+    };
+  },
+};
+
+// -------------------------------------------------------------------- offers
+
+const offersTool: ToolDef = {
+  name: "special_offers",
+  title: "Torob's current special offers",
+  description:
+    "The deals Torob is featuring right now - merchandising, not shop data. Useful for 'anything cheap " +
+    "right now?' and seasonal campaigns. It is NOT the seller list for a product: for that, use " +
+    "product_details. A small fixed list, refreshed every ten minutes.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      limit: { type: "number", description: "How many offers (default 10, max 30)." },
+    },
+    required: [],
+  },
+  async run(args) {
+    const limit = clampLimit(args.limit, 10, 30);
+    const offers = await specialOffers(limit);
+    return {
+      count: offers.length,
+      offers,
+      note: "Torob's featured deals. For one product's sellers, use product_details instead.",
+    };
+  },
+};
+
+export const TOOLS: ToolDef[] = [
+  suggestTool,
+  searchTool,
+  detailsTool,
+  similarTool,
+  compareTool,
+  bestValueTool,
+  categoriesTool,
+  locationsTool,
+  offersTool,
+];
 
 export function toolByName(name: string): ToolDef | undefined {
   return TOOLS.find((t) => t.name === name);

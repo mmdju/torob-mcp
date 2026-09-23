@@ -8,7 +8,7 @@ import {
 import { UpstreamError } from "./http.js";
 import { READ_ONLY, TOOLS } from "./tools.js";
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.2.0";
 
 // Server-level guidance: cheaper than repeating it in every tool description,
 // and it steers the agent before it picks a tool at all. It is the first thing
@@ -18,16 +18,25 @@ export const INSTRUCTIONS = [
   "Torob (Iran's price-comparison engine) price intelligence. Read-only, no API key needed.",
   "All prices are in Toman.",
   "Pick the entry point: torob_suggest when the wording is vague, search_products to browse, " +
-  "product_details for one product's seller list, compare_products to put 2-5 products side by side, " +
-  "find_best_value for any question with a budget or the word 'best'.",
+  "product_details for one product's seller list, similar_products for 'what else is like this', " +
+  "compare_products to put 2-5 products side by side, find_best_value for any question with a budget " +
+  "or the word 'best', browse_categories to walk the category tree, list_locations for province and city " +
+  "ids, special_offers for the deals Torob is featuring.",
   "A search card carries the CHEAPEST offer only, not every seller. To answer 'who sells this' or " +
   "'is that shop reliable' call product_details - that is where the full seller list, shop scores and " +
   "vote counts live.",
+  "Every search returns available_filters - the filter groups that search really accepts, with their " +
+  "slugs. Pass those slugs back in filters, or use min_price_toman / max_price_toman for a price window. " +
+  "Torob ignores an unknown slug and answers unfiltered, so an unknown one is refused here instead.",
+  "Product ids are only usable after this server has returned them: Torob cannot look up a product by id " +
+  "alone. Search for the product first, then pass the prk to product_details or similar_products.",
   "price_toman 0, or available false, means out of stock - never free. An offer flagged price_unreliable " +
   "is Torob's own warning about that number; say so instead of treating it as a bargain.",
   "An empty result is not proof a product does not exist - the wording may simply be wrong. When a search " +
   "returns nothing, call torob_suggest and retry with what it suggests.",
   "Torob pages are paginated (page 1-based, max 50) and deep pages cost an extra upstream request.",
+  "Torob's edge answers bursts of calls with a bot challenge (HTTP 490). It clears after a few idle " +
+  "minutes, so a challenged error is worth retrying later - not worth retrying immediately.",
   "Prices and stock move constantly: always keep the product URL in the answer so the user can confirm " +
   "on torob.com before buying.",
   "This server never logs in, never solves bot challenges, and never contacts a shop. It reads the public " +

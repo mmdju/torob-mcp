@@ -11,7 +11,14 @@
 export { ZWNJ, faFold, faSearchVariants } from "fa-text-utils";
 
 export function str(v: unknown, fallback = ""): string {
-  return typeof v === "string" ? v : fallback;
+  // Ids and codes arrive as numbers from some endpoints and as strings from
+  // others - province/city ids are numeric upstream, product ids are strings.
+  // Coercing here means a projection can read one shape without knowing which
+  // endpoint it came from; without the number case, `str(1)` returned "" and
+  // every row of a perfectly good response was silently dropped.
+  if (typeof v === "string") return v;
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  return fallback;
 }
 
 export function num(v: unknown, fallback: number): number {

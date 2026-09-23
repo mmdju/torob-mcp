@@ -73,7 +73,6 @@ export interface ProductDetails extends ProductCard {
   price_spread_toman: number | null;
   cheapest_offer: Offer | null;
   best_rated_offer: Offer | null;
-  similar_count: number;
   attribution: string;
 }
 
@@ -124,9 +123,9 @@ export interface RawSearch {
   max_price?: unknown;
   next?: unknown;
   categories?: unknown;
-  filters1?: unknown;
-  filters2?: unknown;
-  attributes?: unknown;
+  filters1?: unknown[];
+  filters2?: unknown[];
+  attributes?: unknown[];
   spellcheck?: unknown;
   has_visible_result?: unknown;
 }
@@ -183,7 +182,12 @@ export function toCard(row: RawProduct): ProductCard | null {
 // The id a caller gets back is only half an address: Torob's details endpoint
 // also needs a `search_id` that exists only on the row we just saw. Remember
 // the row's details URL against its id, so `product_details(prk)` works
-// instead of failing on a search that matches names, not ids.
+// without searching again.
+//
+// This map is per-isolate, and a Worker hands consecutive requests to different
+// isolates, so a later call can arrive at a fresh isolate that never saw the
+// search. It is a fast path, not the mechanism: `rowForId` re-resolves by name
+// when the memory is cold, which is what makes the tool survive that.
 const detailUrls = new Map<string, { url: string; name: string | null }>();
 const DETAIL_URL_MEMORY = 500;
 
@@ -196,6 +200,23 @@ function rememberDetailUrl(row: RawProduct): void {
     if (!oldest.done) detailUrls.delete(oldest.value);
   }
   detailUrls.set(prk, { url, name: short(row.name1, 160) });
+  // The name is what makes a cold isolate able to re-resolve the id, so it is
+  // kept on its own longer than the details URL it came with, and shared
+  // across isolates.
+  const name = short(row.name1, 160);
+  rememberName(prk, name);
+  if (name) void cacheSet(prk, { name }, NAME_TTL_SECONDS);
+}
+
+const productNames = new Map<string, string | null>();
+const NAME_MEMORY = 2000;
+
+function rememberName(prk: string, name: string | null): void {
+  if (productNames.size >= NAME_MEMORY) {
+    const oldest = productNames.keys().next();
+    if (!oldest.done) productNames.delete(oldest.value);
+  }
+  productNames.set(prk, name);
 }
 
 function toOffer(raw: RawOffer): Offer | null {
@@ -247,8 +268,8 @@ export function offersOf(row: RawProduct): Offer[] {
 
 // ----------------------------------------------------------------- endpoints
 
-function searchKey(q: string, page: number, sort: string, category: string, shopType: string): string {
-  return `s:${q}|${page}|${sort}|${category}|${shopType}`;
+function searchKey(q: string, page: number, sort: string, category: string, shopType: string, filters: string): string {
+  return `s:${q}|${page}|${sort}|${category}|${shopType}|${filters}`;
 }
 
 export interface SearchOptions {
@@ -259,6 +280,8 @@ export interface SearchOptions {
   brand?: string;
   city?: string;
   shopType?: string;
+  /** Upstream filter params, already validated by the tool layer. */
+  filters?: Record<string, string>;
 }
 
 export interface SearchResult {
@@ -272,6 +295,8 @@ export interface SearchResult {
   max_price_toman: number | null;
   /** Categories Torob suggested for this wording, so an agent can narrow down. */
   suggested_categories: { id: string; title: string }[];
+  /** Every filter group this search accepts, with its slug. */
+  available_filters: FilterGroup[];
   spellcheck: { corrected: string | null; original: string } | null;
   attribution: string;
 }
@@ -287,6 +312,52 @@ function categoriesOf(raw: unknown): { id: string; title: string }[] {
   return out.slice(0, 8);
 }
 
+export interface FilterGroup {
+  title: string;
+  slug: string;
+  type: string;
+  /** How many values this group has; the values themselves are not inlined. */
+  values: number;
+  /** For a brand group, the endpoint that lists its values. */
+  values_url?: string;
+  /** A few example values, so a caller can see the shape without a call. */
+  sample?: { slug: string; label: string }[];
+}
+
+// filters1 are range/select groups, filters2 are toggles, attributes are the
+// grouped ones (brand, colour, ...) that carry their own values endpoint.
+// All three are collapsed into one flat list because that is how a caller
+// thinks about them: "what can I narrow this search by".
+function filterGroupsOf(raw: RawSearch): FilterGroup[] {
+  const out: FilterGroup[] = [];
+  const brief = (g: any) => {
+    const slug = str(g?.slug).trim();
+    if (!slug) return null;
+    const items = Array.isArray(g?.items) ? g.items : [];
+    return {
+      title: str(g?.title, slug),
+      slug,
+      type: str(g?.type, "unknown"),
+      values: items.length,
+      ...(str(g?.url) ? { values_url: str(g.url) } : {}),
+      ...(items.length
+        ? {
+            sample: items.slice(0, 3).map((i: any) => ({
+              slug: str(i?.slug),
+              label: str(i?.name1 ?? i?.title ?? i?.value),
+            })),
+          }
+        : {}),
+    } satisfies FilterGroup;
+  };
+  for (const group of [...(raw.filters1 ?? []), ...(raw.filters2 ?? []), ...(raw.attributes ?? [])]) {
+    if (!group || typeof group !== "object") continue;
+    const b = brief(group);
+    if (b) out.push(b);
+  }
+  return out;
+}
+
 export async function searchProducts(opts: SearchOptions): Promise<SearchResult> {
   const raw = await searchRaw(opts);
   return projectSearch(raw, opts);
@@ -295,7 +366,8 @@ export async function searchProducts(opts: SearchOptions): Promise<SearchResult>
 // The upstream payload, cached. Kept separate from the projection so the
 // details path can reuse a search it already paid for instead of asking again.
 async function searchRaw(opts: SearchOptions): Promise<RawSearch> {
-  const key = searchKey(opts.q, opts.page, opts.sort, opts.category ?? "", opts.shopType ?? "");
+  const filters = opts.filters ?? {};
+  const key = searchKey(opts.q, opts.page, opts.sort, opts.category ?? "", opts.shopType ?? "", JSON.stringify(filters));
   return cached(key, TTL.search, () => {
     const params = new URLSearchParams({
       q: opts.q,
@@ -307,6 +379,8 @@ async function searchRaw(opts: SearchOptions): Promise<RawSearch> {
     if (opts.category) params.set("category", opts.category);
     if (opts.brand) params.set("brand", opts.brand);
     if (opts.city) params.set("city", opts.city);
+    // Validated slugs, passed through as upstream expects them.
+    for (const [k, v] of Object.entries(filters)) params.set(k, v);
     if (opts.shopType) params.set("shop_type", opts.shopType);
     return torobGet<RawSearch>(`/v4/base-product/search/?${params.toString()}`);
   });
@@ -332,6 +406,10 @@ function projectSearch(raw: RawSearch, opts: SearchOptions): SearchResult {
     min_price_toman: toman(raw.min_price),
     max_price_toman: toman(raw.max_price),
     suggested_categories: categoriesOf(raw.categories),
+    // The filter groups and attributes this search would accept. Reporting
+    // them is what lets an agent narrow down without a second discovery call,
+    // and it is how a caller learns the real slugs before using `filters`.
+    available_filters: filterGroupsOf(raw),
     spellcheck: spell
       ? {
           corrected: str(spell.corrected_query).trim() || null,
@@ -371,6 +449,52 @@ async function rowForId(prk: string, fallbackQuery?: string): Promise<RawProduct
   return null;
 }
 
+// The name has to outlive the isolate. A Worker spreads consecutive requests
+// across many isolates, so an in-process map is a fast path and nothing more -
+// a live test caught a call failing because it landed somewhere the search had
+// never run. The Cache API is per-colo rather than per-isolate, so one isolate
+// learning a name spares the others. It is a cache: a write that fails only
+// costs one extra search, so failures are swallowed rather than raised.
+const NAME_CACHE_PREFIX = "https://torob-mcp.internal/product-name/";
+const NAME_TTL_SECONDS = 24 * 60 * 60;
+
+async function cacheGet(key: string): Promise<unknown | undefined> {
+  try {
+    const cache = (globalThis as { caches?: { default?: Cache } }).caches?.default;
+    if (!cache) return undefined;
+    const hit = await cache.match(`${NAME_CACHE_PREFIX}${key}`);
+    return hit ? await hit.json() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function cacheSet(key: string, value: unknown, ttlSeconds: number): Promise<void> {
+  try {
+    const cache = (globalThis as { caches?: { default?: Cache } }).caches?.default;
+    if (!cache) return;
+    await cache.put(
+      `${NAME_CACHE_PREFIX}${key}`,
+      new Response(JSON.stringify(value), {
+        headers: { "content-type": "application/json", "cache-control": `public, max-age=${ttlSeconds}` },
+      })
+    );
+  } catch {
+    /* best effort - the in-process map still has it */
+  }
+}
+
+async function nameFor(prk: string): Promise<string | null> {
+  const local = productNames.get(prk);
+  if (local) return local;
+  const shared = (await cacheGet(prk)) as { name?: string } | undefined;
+  if (shared?.name) {
+    rememberName(prk, shared.name);
+    return shared.name;
+  }
+  return null;
+}
+
 // The caller may hand us a bare id, a /p/<id>/ path, or a full torob.com URL.
 // An agent that read an id out of a link should not have to parse it out.
 export function idFrom(source: string): string {
@@ -405,14 +529,16 @@ export async function productDetails(
     if (remembered) {
       moreInfoUrl = remembered.url;
     } else {
-      // The id is not a search term upstream, so search for it by name. The
-      // name is the only other thing this server keeps, and it is enough.
-      const row = await rowForId(prk);
+      // A cold isolate (a Worker hands requests to several of them) has no
+      // details URL, but the name is shared across isolates, and the name is
+      // enough to re-resolve the id.
+      const name = await nameFor(prk);
+      const row = await rowForId(prk, name ?? undefined);
       if (!row?.more_info_url) {
         throw new UpstreamError(
           `No Torob product matched '${wanted}', and this server has no earlier record of it. ` +
-            `Product ids expire: call search_products with what the user asked for, then pass the prk ` +
-            `from that fresh result.`,
+            `Product ids expire and are not searchable on their own: call search_products with what the ` +
+            `user asked for, then pass the prk from that fresh result.`,
           "usage"
         );
       }
@@ -448,9 +574,191 @@ export async function productDetails(
     price_spread_toman: prices.length > 1 ? Math.max(...prices) - Math.min(...prices) : null,
     cheapest_offer: offers.find((o) => o.available && o.price_toman !== null) ?? null,
     best_rated_offer: bestRated,
-    similar_count: 0,
     attribution: ATTRIBUTION,
   };
+}
+
+/**
+ * Products Torob considers comparable to this one. This is the "that one is
+ * too expensive - what else?" call, and it needs the same id resolution as
+ * product_details.
+ */
+export async function similarProducts(prkInput: string, limit: number): Promise<ProductCard[]> {
+  const wanted = prkInput.trim();
+  if (!wanted) throw new UpstreamError("Empty product id.", "usage");
+  const prk = idFrom(wanted);
+  // similar-base-product takes a bare prk, but only for a product this server
+  // has actually seen: the endpoint answers nothing for an id it cannot
+  // resolve, so the id is confirmed first - by memory, or by re-finding the
+  // product through a name search on a cold isolate.
+  let confirmed = detailUrls.has(prk);
+  if (!confirmed) {
+    const name = await nameFor(prk);
+    if (name) {
+      const row = await rowForId(prk, name);
+      confirmed = row !== null;
+    }
+  }
+  if (!confirmed) {
+    throw new UpstreamError(
+      `No record of product '${wanted}' on this server, and Torob cannot look up a product by id alone. ` +
+        `Call search_products for what the user asked for first, then call similar_products with the prk ` +
+        `from that result.`,
+      "usage"
+    );
+  }
+  const raw = await cached(`sim:${prk}`, TTL.similar, () =>
+    torobGet<RawSearch>(
+      `/v4/base-product/similar-base-product/?prk=${encodeURIComponent(prk)}&limit=24&source=torob_search`
+    )
+  );
+  const rows = Array.isArray(raw.results) ? (raw.results as RawProduct[]) : [];
+  for (const row of rows) rememberDetailUrl(row);
+  return rows.map(toCard).filter((c): c is ProductCard => c !== null).slice(0, limit);
+}
+
+// ---------------------------------------------------------------- categories
+
+export interface CategoryNode {
+  id: string;
+  title: string;
+  slug: string | null;
+  image: string | null;
+  url: string | null;
+  /** How many products Torob has under this category. */
+  product_count: number;
+  has_children: boolean;
+  parent_id: string | null;
+}
+
+/**
+ * Torob's category tree, one level at a time. There is no "list all
+ * categories" endpoint - the tree is walked through this one, which is why a
+ * parent id is required. The live payload nests under `categories` and carries
+ * a product count, which is what makes the walk worth doing.
+ */
+export async function categoryChildren(
+  id: string,
+  limit: number
+): Promise<{ parent: string; categories: CategoryNode[]; has_more: boolean }> {
+  const parent = str(id).trim();
+  if (!parent) throw new UpstreamError("browse_categories needs a category id. Use id '1' for the top level.", "usage");
+  const raw = (await cached(`cat:${parent}:${limit}`, TTL.category, () =>
+    torobGet<any>(`/v4/category/price-list-nested/?id=${encodeURIComponent(parent)}&page=0&size=${Math.min(30, Math.max(1, limit))}`)
+  )) as { categories?: unknown; categories_count?: unknown };
+  const list = Array.isArray(raw?.categories) ? raw.categories : [];
+  const categories: CategoryNode[] = [];
+  for (const c of list) {
+    const cid = str(c?.id ?? c?.cat_id).trim();
+    const title = short(c?.title ?? c?.name, 80);
+    if (!cid || !title) continue;
+    const count = num(c?.count, 0);
+    categories.push({
+      id: cid,
+      title,
+      slug: short(c?.slug, 120),
+      image: short(c?.image, 300),
+      url: str(c?.absolute_url).startsWith("/") ? `https://torob.com${str(c.absolute_url)}` : short(c?.absolute_url, 300),
+      product_count: Math.max(0, Math.round(count)),
+      has_children: count > 0,
+      parent_id: parent,
+    });
+  }
+  return { parent, categories, has_more: categories.length >= limit };
+}
+
+// ----------------------------------------------------------------- locations
+
+export interface Province {
+  id: string;
+  name: string;
+}
+
+export interface City {
+  id: string;
+  name: string;
+  province_id: string | null;
+}
+
+// Both location endpoints answer {count, next, previous, results:[{id, name}]}
+// - verified live. The first attempt guessed `title` and silently returned an
+// empty list, which is exactly the failure this projection exists to prevent:
+// an endpoint that answers 200 with the wrong field name looks like "no such
+// place", not like a bug.
+function nameOf(row: any): string | null {
+  return short(row?.name ?? row?.title, 80);
+}
+
+export async function provinces(): Promise<Province[]> {
+  const raw = (await cached("prov", TTL.locations, () =>
+    torobGet<any>("/v4/province/list/?size=200")
+  )) as { results?: unknown };
+  const out: Province[] = [];
+  for (const p of Array.isArray(raw?.results) ? raw.results : []) {
+    const id = str(p?.id ?? p?.province_id).trim();
+    const name = nameOf(p);
+    if (id && name) out.push({ id, name });
+  }
+  return out;
+}
+
+export async function cities(provinceId?: string, search?: string): Promise<City[]> {
+  const params = new URLSearchParams({ size: "200" });
+  if (provinceId) params.set("province", provinceId);
+  if (search) params.set("search", search);
+  const key = `city:${provinceId ?? ""}:${search ?? ""}`;
+  const raw = (await cached(key, TTL.locations, () =>
+    torobGet<any>(`/v4/city/list/?${params.toString()}`)
+  )) as { results?: unknown };
+  const out: City[] = [];
+  for (const c of Array.isArray(raw?.results) ? raw.results : []) {
+    const id = str(c?.id ?? c?.city_id).trim();
+    const name = nameOf(c);
+    if (!id || !name) continue;
+    out.push({ id, name, province_id: str(c?.province_id ?? c?.province) || null });
+  }
+  return out;
+}
+
+// -------------------------------------------------------------------- offers
+
+export interface SpecialOffer {
+  /** The banner/deal group this item belongs to. */
+  group: string | null;
+  title: string | null;
+  description: string | null;
+  image: string | null;
+  url: string | null;
+}
+
+/**
+ * Torob's featured-deals page. This is merchandising, not shop data: the live
+ * payload is grouped banners under `results[].data[]`, each with a link and an
+ * image, and some point off-site (TorobPay). Kept clearly separate from the
+ * seller-offers list on a product, and the destination is reported as-is so a
+ * caller can see when it leaves torob.com.
+ */
+export async function specialOffers(limit: number): Promise<SpecialOffer[]> {
+  const raw = (await cached("so", TTL.offers, () => torobGet<any>("/v4/special-offers/?page=0"))) as {
+    name?: unknown;
+    results?: { type?: unknown; data?: unknown }[];
+  };
+  const groupName = short(raw?.name, 120);
+  const out: SpecialOffer[] = [];
+  for (const group of Array.isArray(raw?.results) ? raw.results : []) {
+    for (const o of Array.isArray(group?.data) ? group.data : []) {
+      const url = str(o?.more_info_url ?? o?.api_url).trim();
+      out.push({
+        group: groupName ?? (num(group?.type, 0) ? `group ${Math.round(num(group.type, 0))}` : null),
+        title: short(o?.title ?? o?.name1 ?? o?.text, 120),
+        description: short(o?.description ?? o?.subtitle, 240),
+        image: short(o?.desktop_image_url ?? o?.image_url, 300),
+        url: url || null,
+      });
+    }
+    if (out.length >= limit) break;
+  }
+  return out.slice(0, limit);
 }
 
 export async function suggestTerms(q: string): Promise<{ query: string; suggestions: string[] }> {
@@ -465,8 +773,4 @@ export async function suggestTerms(q: string): Promise<{ query: string; suggesti
     }
   }
   return { query: q, suggestions: [...new Set(out)].slice(0, 10) };
-}
-
-export function emptyList(): ProductCard[] {
-  return [];
 }

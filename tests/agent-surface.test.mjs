@@ -19,28 +19,38 @@ test("every tool is named in the server instructions", () => {
 });
 
 test("instructions name no tool that does not exist", () => {
-  // snake_case in the instructions is ambiguous: it is either a tool call or a
-  // response field. A field name that no longer exists is a smaller sin than a
-  // tool name that 404s, so both are checked - against the real tool list and
-  // against the fields these tools actually emit.
+  // snake_case in the instructions is ambiguous: it is either a tool call, a
+  // response field, or an upstream slug the server deliberately refuses. All
+  // three are checked, because a name an agent cannot use is a small lie.
   const tools = new Set(TOOLS.map((t) => t.name));
   const fields = new Set([
     "price_toman",
     "price_unreliable",
     "available",
-    "prk",
-    "page",
-    "sort",
-    "limit",
+    "available_filters",
+    "min_price_toman",
+    "max_price_toman",
     "budget_toman",
-    "query",
+    "suggested_categories",
+    "prk",
   ]);
   for (const token of INSTRUCTIONS.match(/\b[a-z][a-z0-9]*_[a-z_]+\b/g) ?? []) {
     assert.ok(
-      tools.has(token) || fields.has(token),
+      tools.has(token) || fields.has(token) || token === "filters",
       `INSTRUCTIONS mentions '${token}', which is neither a tool nor a field this server emits`
     );
   }
+});
+
+test("every filter slug the instructions promise is one the server accepts", () => {
+  // The instructions tell an agent to read slugs off available_filters and
+  // pass them back. A slug the server then refuses would be a loop that can
+  // never succeed.
+  assert.match(INSTRUCTIONS, /available_filters/);
+  const schema = TOOLS.find((t) => t.name === "search_products").inputSchema;
+  assert.ok(schema.properties.filters, "search_products must accept a filters object");
+  assert.ok(schema.properties.min_price_toman, "search_products must accept a price floor");
+  assert.ok(schema.properties.max_price_toman, "search_products must accept a price ceiling");
 });
 
 test("every response field the instructions promise really exists", () => {

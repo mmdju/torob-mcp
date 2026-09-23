@@ -4,6 +4,27 @@ All notable changes to this project are documented here.
 
 ## unreleased
 
+## 0.2.0
+
+### Added
+
+- Search filters. `min_price_toman` / `max_price_toman` as first-class parameters, plus a `filters` object for Torob's own slugs. Every search now returns `available_filters` - the filter groups that search really accepts, with their slugs - so a caller can narrow down without a discovery call. An unknown slug is refused with the real ones, because Torob ignores an unknown slug and answers unfiltered.
+- `similar_products` - products Torob considers comparable to one you pass, for the "that one is too expensive, what else?" question.
+- `browse_categories` - walks Torob's category tree one level at a time (start with id `1`), with each category's product count.
+- `list_locations` - provinces, or a province's cities, for the `city` filter.
+- `special_offers` - the deals Torob is currently featuring. Merchandising, kept clearly separate from a product's seller list.
+
+### Fixed
+
+- Product ids now resolve across Worker isolates. A Worker spreads requests over many isolates, so a product name learned by one was invisible to the next and `product_details` / `similar_products` could fail for an id this server had just returned. Names are now shared through the per-colo Cache API.
+- Numeric ids are read correctly. Torob sends province and city ids as numbers, and the string-only coercion silently dropped every row of a valid response - the tools reported "no provinces exist" while upstream had 30.
+- `short()` no longer overshoots its length cap by two characters.
+
+### Changed
+
+- A bot challenge now opens a circuit breaker for that isolate. The rest of a burst fails immediately with a "retry in N minutes" message and spends no upstream request, instead of retrying into a longer block. It expires on its own; a fresh isolate gets a clean chance.
+- The upstream pacing gap is 1.5s, and the challenge message now says plainly that an immediate retry will not help.
+
 ## 0.1.0
 
 First release.

@@ -26,7 +26,6 @@ export const MAX_BODY_BYTES = 1_000_000;
 // than JSON - not a 429, and not a redirect. The gap below just keeps us
 // from inviting one; a 490 is turned into an actionable error, never a retry
 // storm, because a challenge does not solve itself.
-export const MIN_GAP_MS = 400;
 export const MAX_RETRIES = 3;
 export const RETRY_DELAY_MS = 2000;
 
@@ -44,11 +43,41 @@ export type Sort = (typeof SORTS)[number];
 export const SHOP_TYPES = ["offline", "online"] as const;
 export type ShopType = (typeof SHOP_TYPES)[number];
 
+// Torob accepts an arbitrary query string on the search endpoint; the filter
+// slugs below were read off a live response (filters1 had 13 groups, filters2
+// had 5 toggles, attributes had 12 groups including brand). Rather than
+// hard-code a list that upstream can change under us, filters are passed as
+// (slug, value) pairs and any slug the response did not offer is refused with
+// the real ones - the same rule this workspace uses for unknown categories and
+// cities. A silently-ignored filter would look like a filtered result.
+export const KNOWN_FILTER_SLUGS = [
+  "price__gt",
+  "price__lt",
+  "available",
+  "offline",
+  "torobpay",
+  "has_warranty",
+  "has_discount",
+  "seller_type",
+  "brand",
+  "category",
+] as const;
+
+// The gap between upstream calls. Torob's edge challenges a client that
+// arrives too fast - measured: a worker answering normally, then answering 490
+// after a burst of probes, and recovering after roughly five idle minutes. The
+// number here is deliberately unhurried; a 429-free but challenged response is
+// worse for the user than a slow answer.
+export const MIN_GAP_MS = 1500;
+
 export const TTL = {
   suggest: 6 * HOUR, // autocomplete vocabulary barely moves
   search: 8 * MIN, // prices move, result sets do not
   product: 5 * MIN, // seller offers and stock are the volatile part
   category: 30 * MIN,
+  similar: 15 * MIN,
+  locations: 24 * HOUR, // province/city lists are administrative facts
+  offers: 10 * MIN,
 };
 
 export const ATTRIBUTION =
@@ -58,10 +87,14 @@ export const ATTRIBUTION =
 
 // The wall is not a rate limit and cannot be retried through: it is an
 // anti-bot challenge. Say so plainly instead of returning an empty list that
-// an agent would read as "no such product".
+// an agent would read as "no such product". Measured: it clears on its own
+// after a few idle minutes, so the message says that rather than telling the
+// caller to give up - and the server's circuit breaker stops the rest of a
+// burst from hammering while it waits.
 export const CHALLENGED_MSG =
-  "Torob answered with a bot challenge (HTTP 490) instead of data. This is not a " +
-  "rate limit and retrying will not clear it. Retry in a few minutes, or ask the " +
+  "Torob answered with a bot challenge (HTTP 490) instead of data, because too many calls " +
+  "arrived too quickly. This is not a rate limit and an immediate retry will not clear it - " +
+  "it clears after a few minutes of no calls. Wait, then retry the same call; or ask the " +
   "user to search on torob.com and share the product URL.";
 
 // Torob reports a shop score for essentially every offer but almost never

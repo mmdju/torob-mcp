@@ -73,20 +73,52 @@ function looksLikeChallenge(res: Response, body: string): boolean {
   return /arcaptcha|ربات هستید|captcha/i.test(body.slice(0, 4000));
 }
 
+// ------------------------------------------------------------ circuit breaker
+//
+// Measured 2026-09-24: Torob's edge answers a client that calls too often with
+// a challenge instead of data, and it clears after a few idle minutes. Left
+// alone, every one of those challenges is a full upstream round trip that
+// also deepens the block - a retry storm against a wall that punishes retries.
+//
+// So the first challenge opens a breaker for this isolate: later calls fail
+// immediately, with an honest "wait N minutes" message, and no request is
+// sent. That both protects the caller and lets Torob see quiet long enough to
+// let the block lapse. It is per-isolate on purpose: a fresh isolate gets a
+// clean chance rather than inheriting someone else's cooldown.
+const BREAKER_MS = 5 * 60_000;
+let breakerUntil = 0;
+
+export function breakerRemainingMs(): number {
+  return Math.max(0, breakerUntil - Date.now());
+}
+
+function openBreaker(): void {
+  breakerUntil = Date.now() + BREAKER_MS;
+}
+
+export function resetBreakerForTests(): void {
+  breakerUntil = 0;
+}
+
 /**
  * Call the Torob API and return parsed JSON.
  *
  * @param path Absolute URL, or a path relative to the API base.
- * @param opts.searchId Attached to the cache key so two searches with the same
- *   text but different tracking ids do not collide.
  */
-export async function torobGet<T = unknown>(
-  path: string,
-  opts?: { retries?: number; searchId?: string }
-): Promise<T> {
+export async function torobGet<T = unknown>(path: string, opts?: { retries?: number }): Promise<T> {
   const url = path.startsWith("http") ? path : `${TOROB_API}${path}`;
   const retries = opts?.retries ?? MAX_RETRIES;
   let lastError: unknown = null;
+
+  const waiting = breakerRemainingMs();
+  if (waiting > 0) {
+    throw new UpstreamError(
+      `Torob challenged this worker recently, so no call was made. It clears on its own - retry in ` +
+        `about ${Math.ceil(waiting / 60_000)} minute(s). Nothing was searched, so no result below is ` +
+        `missing because of this.`,
+      "challenged"
+    );
+  }
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     await pace();
@@ -107,8 +139,10 @@ export async function torobGet<T = unknown>(
 
       // A challenge is never retried: solving it is not this server's job and
       // hammering the endpoint while it is up is how a temporary block becomes
-      // a permanent one.
+      // a permanent one. The first one also opens the breaker, so the calls
+      // behind it in a burst fail without spending an upstream request.
       if (looksLikeChallenge(res, body)) {
+        openBreaker();
         throw new UpstreamError(CHALLENGED_MSG, "challenged", { status: res.status });
       }
 
