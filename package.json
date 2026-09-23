@@ -1,0 +1,35 @@
+{
+  "name": "torob-mcp",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "MCP server for Torob (Iran's price-comparison engine): search, compare and price-check across shops. Read-only, no API key.",
+  "keywords": [
+    "torob",
+    "mcp",
+    "model-context-protocol",
+    "cloudflare-workers",
+    "price-comparison"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js",
+    "serve": "node dist/index.js --http",
+    "test": "npm run build && node --test tests/normalize.test.mjs tests/project.test.mjs tests/tools.test.mjs tests/agent-surface.test.mjs tests/version-sync.test.mjs tests/health.test.mjs tests/test-manifest.test.mjs",
+    "test:live": "npm run build && node scripts/test-client.mjs",
+    "probe": "node scripts/probe-api.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "fa-text-utils": "github:mmdju/fa-text-utils#v1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^4.135.0"
+  }
+}

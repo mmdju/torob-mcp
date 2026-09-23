@@ -1,0 +1,13 @@
+name = "torob-mcp"
+main = "dist/worker.js"
+account_id = "525eb5c067d16e8bcb2eab23b20ee7a1"
+compatibility_date = "2026-09-01"
+
+# Keyless and stateless: no bindings and no secrets. Torob needs no login
+# token and this server never signs in.
+#
+# One thing worth knowing: Torob's edge answers data-centre clients with an
+# arCAPTCHA page (HTTP 490) instead of JSON. Requests are expected to be
+# answered from a Cloudflare Worker's own egress, which is not challenged -
+# see src/http.ts for how a 490 is turned into an actionable error rather
+# than an empty result.
