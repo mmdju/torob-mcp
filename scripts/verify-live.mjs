@@ -4,7 +4,7 @@
 // Run: node scripts/verify-live.mjs [url] [gap-ms]
 import { readFile } from "node:fs/promises";
 
-const BASE = process.argv[2] ?? "https://torob-mcp.mmdju.workers.dev";
+const BASE = process.argv[2] ?? "https://torob-mcp.mmdju3.workers.dev";
 const MCP = `${BASE}/mcp`;
 
 let sessionId = null;

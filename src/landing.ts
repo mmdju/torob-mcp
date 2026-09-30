@@ -102,7 +102,7 @@ export const LANDING = `<!DOCTYPE html>
     <h2>اتصال</h2>
     <pre>{
   "mcpServers": {
-    "torob": { "url": "https://torob-mcp.mmdju.workers.dev/mcp" }
+    "torob": { "url": "https://torob-mcp.mmdju3.workers.dev/mcp" }
   }
 }</pre>
   </div>

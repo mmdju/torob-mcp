@@ -1,6 +1,6 @@
 name = "torob-mcp"
 main = "dist/worker.js"
-account_id = "525eb5c067d16e8bcb2eab23b20ee7a1"
+account_id = "e6ad0b81fd6142add1302be356dad360"
 compatibility_date = "2026-09-01"
 
 # Keyless and stateless: no bindings and no secrets. Torob needs no login

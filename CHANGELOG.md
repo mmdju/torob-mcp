@@ -1,6 +1,6 @@
 # Changelog
 
-Releases of the service (`https://torob-mcp.mmdju.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
+Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
 ## unreleased
 

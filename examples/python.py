@@ -12,7 +12,7 @@ import sys
 import time
 import urllib.request
 
-ENDPOINT = os.environ.get("TOROB_MCP_URL", "https://torob-mcp.mmdju.workers.dev/mcp")
+ENDPOINT = os.environ.get("TOROB_MCP_URL", "https://torob-mcp.mmdju3.workers.dev/mcp")
 
 # Torob challenges a client that calls too fast, so pace the calls.
 GAP = 2.0

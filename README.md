@@ -4,7 +4,7 @@
 
 A public MCP server that gives AI agents **real Torob knowledge**: search **Iran's price-comparison engine**, **prices in Toman**, **every seller's offer on one product**, shop grades and cities, delivery options, Torob's own filters, category tree, provinces and cities, and the deals it is featuring right now. **Read-only, no key needed. No login, ever.**
 
-**Live endpoint:** `https://torob-mcp.mmdju.workers.dev/mcp` (Streamable HTTP, stateless)
+**Live endpoint:** `https://torob-mcp.mmdju3.workers.dev/mcp` (Streamable HTTP, stateless)
 
 **[نسخه فارسی](README_FA.md)** · **[Examples](examples/sample-calls.md)** · **[Tool reference](docs/tools.md)** · **[Changelog](CHANGELOG.md)**
 
@@ -15,7 +15,7 @@ Any MCP client, **one URL**. Cline / Cursor / Claude Desktop (`mcp.json` style):
 ```json
 {
   "mcpServers": {
-    "torob": { "url": "https://torob-mcp.mmdju.workers.dev/mcp" }
+    "torob": { "url": "https://torob-mcp.mmdju3.workers.dev/mcp" }
   }
 }
 ```

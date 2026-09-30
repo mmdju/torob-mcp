@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "torob": {
-      "url": "https://torob-mcp.mmdju.workers.dev/mcp"
+      "url": "https://torob-mcp.mmdju3.workers.dev/mcp"
     }
   }
 }

@@ -4,7 +4,7 @@
 
 یه MCP سرور عمومیه که به ایجgent‌های هوش مصنوعی **دانش واقعی ترب** می‌ده: جستجو تو **موتور مقایسه قیمت ایران**، **قیمت به تومان**، **قیمت همه‌ی فروشنده‌های یک محصول**، درجه و شهر فروشگاه، گزینه‌های ارسال، فیلترهای خود ترب، درخت دسته‌بندی، استان‌ها و شهرها، و پیشنهادهای ویژه‌ی همین الان. **فقط خواندنیه، بدون کلید. بدون لاگین، همیشه.**
 
-**آدرس زنده:** `https://torob-mcp.mmdju.workers.dev/mcp` (Streamable HTTP، بدون state)
+**آدرس زنده:** `https://torob-mcp.mmdju3.workers.dev/mcp` (Streamable HTTP، بدون state)
 
 **[English version](README.md)** · **[مثال‌ها](examples/sample-calls.md)** · **[مرجع ابزارها](docs/tools.md)** · **[تغییرات](CHANGELOG.md)**
 
@@ -15,7 +15,7 @@
 ```json
 {
   "mcpServers": {
-    "torob": { "url": "https://torob-mcp.mmdju.workers.dev/mcp" }
+    "torob": { "url": "https://torob-mcp.mmdju3.workers.dev/mcp" }
   }
 }
 ```
