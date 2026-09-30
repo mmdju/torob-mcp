@@ -1,0 +1,20 @@
+name: Live verify
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+jobs:
+  # A red badge must mean "broken". The endpoint checks (health, version,
+  # landing, handshake, tools/list) do not touch Torob's edge at all, so a red
+  # badge means the deployment drifted. Torob's own answers are checked too,
+  # but a challenge is reported without failing the run - see the script.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/verify-live.mjs

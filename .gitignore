@@ -3,3 +3,4 @@ dist/
 .dev.vars
 .env
 *.log
+.DS_Store
