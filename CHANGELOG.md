@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 
 ## unreleased
 
+### Added
+
+- Every product card and offer row now carries the `details_url` it came from, and `product_details` / `similar_products` accept it back as `details_url`. A caller that keeps both opens the product with no server-side memory involved: the id resolves on an isolate that never saw the search, and no name search is spent on it.
+- Writes to the per-colo cache go through the request's `waitUntil`, so a product name and details URL learned from a search are not cut off when the Worker response finishes.
+
+### Fixed
+
+- The id-only details call no longer reports an empty response as a product. It falls through to the honest "search for it first" error, which names the way to recover.
+
 ## 0.2.0
 
 ### Added

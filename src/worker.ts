@@ -26,14 +26,21 @@ function withCors(res: Response): Response {
   return new Response(res.body, { status: res.status, headers });
 }
 
+// The third argument is the Worker's own ExecutionContext. A tool that learns a
+// product shares it through the per-colo cache, and only `waitUntil` keeps that
+// write alive after the response has been sent.
+interface WorkerContext {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
 export default {
-  async fetch(req: Request): Promise<Response> {
+  async fetch(req: Request, _env?: unknown, ctx?: WorkerContext): Promise<Response> {
     const url = new URL(req.url);
     if (req.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
     if (req.method === "POST" && url.pathname === "/mcp") {
-      const server = buildServer();
+      const server = buildServer(ctx);
       const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       try {
         await server.connect(transport);

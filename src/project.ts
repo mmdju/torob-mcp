@@ -16,7 +16,7 @@
 //    "فروشنده‌ها"). That list is the reason a Torob MCP exists at all, so it
 //    gets a first-class shape rather than being flattened into a string.
 
-import { ATTRIBUTION, MIN_SHOP_VOTES, TTL } from "./config.js";
+import { ATTRIBUTION, MIN_SHOP_VOTES, TOROB_API, TTL } from "./config.js";
 import { cached } from "./cache.js";
 import { UpstreamError, torobGet } from "./http.js";
 import {
@@ -64,6 +64,13 @@ export interface ProductCard {
   image_count: number;
   badges: string[];
   url: string;
+  /**
+   * Torob's own details URL for this row. It carries the `search_id` the
+   * details endpoint wants, so passing it back to product_details /
+   * similar_products lets the server open the product without remembering
+   * anything between requests.
+   */
+  details_url: string | null;
 }
 
 export interface ProductDetails extends ProductCard {
@@ -160,6 +167,28 @@ function priceOf(row: RawProduct): number | null {
   return tomanFromText(row.price_text);
 }
 
+// Torob's details endpoint, and nothing else: the tool layer accepts a URL from
+// the caller, so this is the gate that keeps a caller-supplied string from
+// pointing a fetch somewhere else.
+const DETAILS_HOST = "api.torob.com";
+const DETAILS_PATH = "/v4/base-product/details/";
+
+/** A URL only when it is one of Torob's own details URLs, otherwise null. */
+export function detailsUrlOf(v: unknown): string | null {
+  const raw = str(v).trim();
+  if (!raw) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:") return null;
+  if (parsed.hostname !== DETAILS_HOST) return null;
+  if (!parsed.pathname.startsWith(DETAILS_PATH)) return null;
+  return parsed.toString();
+}
+
 export function toCard(row: RawProduct): ProductCard | null {
   const prk = str(row.random_key).trim();
   if (!prk) return null;
@@ -176,47 +205,69 @@ export function toCard(row: RawProduct): ProductCard | null {
     image_count: Math.max(0, Math.round(num(row.image_count, 0))),
     badges: badgesOf(row.badges),
     url: productUrl(row.web_client_absolute_url, prk) ?? `https://torob.com/p/${prk}/`,
+    details_url: detailsUrlOf(row.more_info_url),
   };
 }
 
 // The id a caller gets back is only half an address: Torob's details endpoint
-// also needs a `search_id` that exists only on the row we just saw. Remember
-// the row's details URL against its id, so `product_details(prk)` works
-// without searching again.
+// also wants a `search_id` that exists only on the row we just saw. Three
+// things can supply it, and `detailsUrlForId` tries them in this order: the row
+// remembered here, the `details_url` the caller echoes back (every card
+// carries it), and a fresh search for the product's own name.
 //
-// This map is per-isolate, and a Worker hands consecutive requests to different
-// isolates, so a later call can arrive at a fresh isolate that never saw the
-// search. It is a fast path, not the mechanism: `rowForId` re-resolves by name
-// when the memory is cold, which is what makes the tool survive that.
+// The map is per-isolate, and a Worker hands consecutive requests to different
+// isolates, so it is a fast path and never the mechanism.
 const detailUrls = new Map<string, { url: string; name: string | null }>();
 const DETAIL_URL_MEMORY = 500;
 
-function rememberDetailUrl(row: RawProduct): void {
-  const prk = str(row.random_key).trim();
-  const url = str(row.more_info_url).trim();
-  if (!prk || !url) return;
+// A Worker may finish a request before a floating promise settles, and a cache
+// write that was never awaited is exactly how the shared name used to go
+// missing: the entry survived only in the isolate that learned it. Anything
+// that has to outlive the response goes through here - the Worker hands over
+// its `waitUntil`, and Node simply lets the promise run.
+export interface WaitUntil {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
+let keepAliveFn: ((promise: Promise<unknown>) => void) | null = null;
+
+export function setWaitUntil(fn: ((promise: Promise<unknown>) => void) | null): void {
+  keepAliveFn = fn;
+}
+
+function keepAlive(promise: Promise<unknown>): void {
+  if (!keepAliveFn) {
+    void promise;
+    return;
+  }
+  try {
+    keepAliveFn(promise);
+  } catch {
+    void promise;
+  }
+}
+
+function rememberResolved(prk: string, url: string, name: string | null): void {
   if (detailUrls.size >= DETAIL_URL_MEMORY) {
     const oldest = detailUrls.keys().next();
     if (!oldest.done) detailUrls.delete(oldest.value);
   }
-  detailUrls.set(prk, { url, name: short(row.name1, 160) });
-  // The name is what makes a cold isolate able to re-resolve the id, so it is
-  // kept on its own longer than the details URL it came with, and shared
-  // across isolates.
-  const name = short(row.name1, 160);
-  rememberName(prk, name);
-  if (name) void cacheSet(prk, { name }, NAME_TTL_SECONDS);
+  detailUrls.set(prk, { url, name });
 }
 
-const productNames = new Map<string, string | null>();
-const NAME_MEMORY = 2000;
-
-function rememberName(prk: string, name: string | null): void {
-  if (productNames.size >= NAME_MEMORY) {
-    const oldest = productNames.keys().next();
-    if (!oldest.done) productNames.delete(oldest.value);
+function rememberDetailUrl(row: RawProduct): void {
+  const prk = str(row.random_key).trim();
+  const url = detailsUrlOf(row.more_info_url);
+  if (!prk || !url) return;
+  const name = short(row.name1, 160);
+  rememberResolved(prk, url, name);
+  // The name is what lets a cold isolate re-resolve the id; the URL it came
+  // with is what makes that cost no upstream call at all. Both travel together
+  // through the per-colo cache, and only when there is a name: a nameless entry
+  // could not be re-found by a search anyway.
+  if (name) {
+    keepAlive(cacheSet(prk, { name, url }, REMEMBERED_TTL_SECONDS));
   }
-  productNames.set(prk, name);
 }
 
 function toOffer(raw: RawOffer): Offer | null {
@@ -427,42 +478,45 @@ async function detailsRaw(moreInfoUrl: string, prk: string): Promise<RawProduct>
   return cached(`d:${prk}`, TTL.product, () => torobGet<RawProduct>(moreInfoUrl));
 }
 
-// A product id on its own is NOT an address upstream, and this was measured:
-// feeding a search result's prk back as a query returns nothing, because the
-// search endpoint matches names, not ids. So the id cannot be resolved by
-// searching for it.
-//
-// What does work: the product's own name. A card carries name1, and a search
-// for that name returns the product again - usually first, and always with a
-// fresh details URL. So the id path re-searches by name and matches on the id.
-async function rowForId(prk: string, fallbackQuery?: string): Promise<RawProduct | null> {
-  const attempts = [prk, fallbackQuery].filter((q): q is string => typeof q === "string" && q.trim().length > 0);
+// A product id on its own is NOT a search term, and this was measured: feeding
+// a search result's prk back as a query returns nothing, because the search
+// endpoint matches names, not ids. The product's own name does work - a card
+// carries name1, and a search for it returns the product again, usually first
+// and always with a fresh details URL - so the name is what re-resolves an id
+// on a cold isolate. The caller's own wording is tried after it.
+async function rowForId(prk: string, ...queries: (string | null | undefined)[]): Promise<RawProduct | null> {
+  const attempts = queries
+    .map((q) => str(q).trim())
+    .filter((q, i, all) => q.length > 0 && all.indexOf(q) === i);
   for (const q of attempts) {
-    const raw = await searchRaw({ q: q.trim(), page: 1, sort: "popularity" });
+    const raw = await searchRaw({ q, page: 1, sort: "popularity" });
     const rows = Array.isArray(raw.results) ? (raw.results as RawProduct[]) : [];
     const exact = rows.find((r) => str(r.random_key) === prk);
     if (exact) return exact;
     // A name search can drift onto a similar product; the first row is the
     // best available match and the caller still gets the real seller list.
-    if (q !== prk && rows[0]?.more_info_url) return rows[0];
+    if (rows[0]?.more_info_url) return rows[0];
   }
   return null;
 }
 
-// The name has to outlive the isolate. A Worker spreads consecutive requests
-// across many isolates, so an in-process map is a fast path and nothing more -
-// a live test caught a call failing because it landed somewhere the search had
-// never run. The Cache API is per-colo rather than per-isolate, so one isolate
-// learning a name spares the others. It is a cache: a write that fails only
-// costs one extra search, so failures are swallowed rather than raised.
-const NAME_CACHE_PREFIX = "https://torob-mcp.internal/product-name/";
-const NAME_TTL_SECONDS = 24 * 60 * 60;
+// What an isolate learns has to outlive it. A Worker spreads consecutive
+// requests across many isolates, so an in-process map is a fast path and
+// nothing more - a live test caught a call failing because it landed somewhere
+// the search had never run. The Cache API is per-colo rather than per-isolate,
+// so one isolate learning a product spares the others in that colo, and the
+// entry carries both things it learned: the name and the details URL. It is a
+// cache: a write that fails only costs one extra search, so failures are
+// swallowed rather than raised - and the write goes through `waitUntil`, so it
+// is not cut off when the response finishes.
+const REMEMBERED_CACHE_PREFIX = "https://torob-mcp.internal/product/";
+const REMEMBERED_TTL_SECONDS = 24 * 60 * 60;
 
 async function cacheGet(key: string): Promise<unknown | undefined> {
   try {
     const cache = (globalThis as { caches?: { default?: Cache } }).caches?.default;
     if (!cache) return undefined;
-    const hit = await cache.match(`${NAME_CACHE_PREFIX}${key}`);
+    const hit = await cache.match(`${REMEMBERED_CACHE_PREFIX}${key}`);
     return hit ? await hit.json() : undefined;
   } catch {
     return undefined;
@@ -474,7 +528,7 @@ async function cacheSet(key: string, value: unknown, ttlSeconds: number): Promis
     const cache = (globalThis as { caches?: { default?: Cache } }).caches?.default;
     if (!cache) return;
     await cache.put(
-      `${NAME_CACHE_PREFIX}${key}`,
+      `${REMEMBERED_CACHE_PREFIX}${key}`,
       new Response(JSON.stringify(value), {
         headers: { "content-type": "application/json", "cache-control": `public, max-age=${ttlSeconds}` },
       })
@@ -484,15 +538,18 @@ async function cacheSet(key: string, value: unknown, ttlSeconds: number): Promis
   }
 }
 
-async function nameFor(prk: string): Promise<string | null> {
-  const local = productNames.get(prk);
-  if (local) return local;
-  const shared = (await cacheGet(prk)) as { name?: string } | undefined;
-  if (shared?.name) {
-    rememberName(prk, shared.name);
-    return shared.name;
-  }
-  return null;
+// What one isolate learned from a search row, read back: the product's name and
+// the details URL that row came with. The in-process map is the fast path; the
+// per-colo cache is what a *different* isolate can still read.
+async function rememberedInfo(prk: string): Promise<{ name: string | null; url: string | null }> {
+  const local = detailUrls.get(prk);
+  if (local) return { name: local.name, url: local.url };
+  const shared = (await cacheGet(prk)) as { name?: string; url?: string } | undefined;
+  if (!shared) return { name: null, url: null };
+  const name = short(shared.name, 160);
+  const url = detailsUrlOf(shared.url);
+  if (url) rememberResolved(prk, url, name);
+  return { name, url };
 }
 
 // The caller may hand us a bare id, a /p/<id>/ path, or a full torob.com URL.
@@ -505,61 +562,112 @@ export function idFrom(source: string): string {
   return (m?.[1] ?? wanted).trim();
 }
 
+export interface ProductDetailsOptions {
+  /** The `details_url` a card carried, handed back by the caller. */
+  detailsUrl?: unknown;
+  /** The words the caller searched with, as a last-resort way back to the row. */
+  query?: unknown;
+}
+
+interface ResolvedProduct {
+  prk: string;
+  url: string;
+  card: ProductCard | null;
+  /** Set only by the last-resort direct call, so it is not paid for twice. */
+  raw?: RawProduct;
+}
+
+/** The details URL for an id, built from the id alone. */
+function prkOnlyDetailsUrl(prk: string): string {
+  return `${TOROB_API}/v4/base-product/details/?prk=${encodeURIComponent(prk)}`;
+}
+
+// A product id is only half an address upstream: the details endpoint also wants
+// the `search_id` of the row it was seen on, and that id exists nowhere else.
+// Four sources can supply it, tried in this order.
+async function detailsUrlForId(wanted: string, opts?: ProductDetailsOptions): Promise<ResolvedProduct> {
+  const prk = idFrom(wanted);
+
+  // 1. Whatever this isolate, or another one in this colo, already learned.
+  const known = await rememberedInfo(prk);
+  if (known.url) return { prk, url: known.url, card: null };
+
+  // 2. The details_url the caller echoed back. This is the path that needs no
+  // memory at all, which is why every card carries the URL.
+  const provided = detailsUrlOf(opts?.detailsUrl);
+  if (provided) {
+    rememberDetailUrl({ random_key: prk, more_info_url: provided } as RawProduct);
+    return { prk, url: provided, card: null };
+  }
+
+  // 3. The name the id was learned under, then the caller's own wording: a prk
+  // is not a search term, a name is.
+  const row = await rowForId(prk, known.name, str(opts?.query));
+  if (row?.more_info_url) {
+    return { prk, url: str(row.more_info_url), card: toCard(row) };
+  }
+
+  // 4. Last resort: ask the details endpoint for the id alone. Whether it
+  // answers is upstream's business, which is why it is tried last - and when it
+  // answers, the id in the response is checked so a different product is never
+  // handed back as this one. A response with no id at all is accepted only when
+  // it still projects to a product: an empty answer to the id-only call is not
+  // a product, and accepting it would hide the honest "search first" error
+  // below, which is the one a caller can act on.
+  try {
+    const raw = await detailsRaw(prkOnlyDetailsUrl(prk), prk);
+    const answeredId = str(raw.random_key).trim();
+    const card = toCard(raw);
+    if (answeredId === prk || (!answeredId && card)) {
+      return { prk, url: prkOnlyDetailsUrl(prk), card, raw };
+    }
+  } catch {
+    /* fall through to the honest error below */
+  }
+
+  throw new UpstreamError(
+    `No Torob product matched '${wanted}', and this server has no earlier record of it. Product ids expire ` +
+      `and are not searchable on their own: call search_products with what the user asked for, then pass both ` +
+      `the prk and the details_url from that fresh result.`,
+    "usage"
+  );
+}
+
 /**
  * Open a product. `source` is either a product id / product URL, or a search
  * result row passed whole.
  *
  * The id is resolved through the details URL this server saw when it handed
- * that id out, and only falls back to a name search if that row is gone (a
- * fresh isolate, a restart, a much older id).
+ * that id out; a caller that passes the card's `details_url` back needs no
+ * memory at all, and a name search covers the case where both are gone (a fresh
+ * isolate, a restart, a much older id).
  */
 export async function productDetails(
-  source: { more_info_url?: string; random_key?: string; prk?: string } | string
+  source: { more_info_url?: string; random_key?: string; prk?: string } | string,
+  opts?: ProductDetailsOptions
 ): Promise<ProductDetails> {
-  let prk: string;
-  let moreInfoUrl: string;
-  let card: ProductCard | null = null;
+  let resolved: ResolvedProduct;
 
   if (typeof source === "string") {
     const wanted = source.trim();
     if (!wanted) throw new UpstreamError("Empty product id.", "usage");
-    prk = idFrom(wanted);
-
-    const remembered = detailUrls.get(prk);
-    if (remembered) {
-      moreInfoUrl = remembered.url;
-    } else {
-      // A cold isolate (a Worker hands requests to several of them) has no
-      // details URL, but the name is shared across isolates, and the name is
-      // enough to re-resolve the id.
-      const name = await nameFor(prk);
-      const row = await rowForId(prk, name ?? undefined);
-      if (!row?.more_info_url) {
-        throw new UpstreamError(
-          `No Torob product matched '${wanted}', and this server has no earlier record of it. ` +
-            `Product ids expire and are not searchable on their own: call search_products with what the ` +
-            `user asked for, then pass the prk from that fresh result.`,
-          "usage"
-        );
-      }
-      card = toCard(row);
-      moreInfoUrl = str(row.more_info_url);
-    }
+    resolved = await detailsUrlForId(wanted, opts);
   } else {
-    moreInfoUrl = str(source.more_info_url);
-    prk = str(source.random_key ?? source.prk).trim();
-    if (!moreInfoUrl) {
+    const url = detailsUrlOf(source.more_info_url);
+    if (!url) {
       throw new UpstreamError(
         "This product row carries no details URL. Re-run search_products and pass the fresh row.",
         "usage"
       );
     }
-    rememberDetailUrl({ random_key: prk, more_info_url: moreInfoUrl } as RawProduct);
+    const prk = str(source.random_key ?? source.prk).trim();
+    rememberDetailUrl({ random_key: prk, more_info_url: url } as RawProduct);
+    resolved = { prk, url, card: null };
   }
 
-  const raw = await detailsRaw(moreInfoUrl, prk);
+  const raw = resolved.raw ?? (await detailsRaw(resolved.url, resolved.prk));
   const offers = offersOf(raw);
-  const base = card ?? toCard(raw);
+  const base = resolved.card ?? toCard(raw);
   if (!base) {
     throw new UpstreamError("Torob returned a product page with no product in it.", "http");
   }
@@ -583,27 +691,35 @@ export async function productDetails(
  * too expensive - what else?" call, and it needs the same id resolution as
  * product_details.
  */
-export async function similarProducts(prkInput: string, limit: number): Promise<ProductCard[]> {
+export async function similarProducts(
+  prkInput: string,
+  limit: number,
+  opts?: ProductDetailsOptions
+): Promise<ProductCard[]> {
   const wanted = prkInput.trim();
   if (!wanted) throw new UpstreamError("Empty product id.", "usage");
   const prk = idFrom(wanted);
   // similar-base-product takes a bare prk, but only for a product this server
   // has actually seen: the endpoint answers nothing for an id it cannot
-  // resolve, so the id is confirmed first - by memory, or by re-finding the
-  // product through a name search on a cold isolate.
+  // resolve. So the id is confirmed first - by memory, by the details_url the
+  // caller echoed back, or by re-finding the product through a name search on a
+  // cold isolate.
+  const provided = detailsUrlOf(opts?.detailsUrl);
+  if (provided) rememberDetailUrl({ random_key: prk, more_info_url: provided } as RawProduct);
   let confirmed = detailUrls.has(prk);
   if (!confirmed) {
-    const name = await nameFor(prk);
-    if (name) {
-      const row = await rowForId(prk, name);
+    const known = await rememberedInfo(prk);
+    confirmed = known.url !== null;
+    if (!confirmed) {
+      const row = await rowForId(prk, known.name, str(opts?.query));
       confirmed = row !== null;
     }
   }
   if (!confirmed) {
     throw new UpstreamError(
       `No record of product '${wanted}' on this server, and Torob cannot look up a product by id alone. ` +
-        `Call search_products for what the user asked for first, then call similar_products with the prk ` +
-        `from that result.`,
+        `Call search_products for what the user asked for first, then call similar_products with the prk and ` +
+        `the details_url from that result.`,
       "usage"
     );
   }

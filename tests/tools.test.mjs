@@ -166,6 +166,56 @@ test("product_details accepts a full torob product URL", async () => {
   assert.equal(out.prk, id);
 });
 
+test("product_details opens a product from just the details_url it handed out", async () => {
+  // The card's details_url is a complete address upstream. Handing it back
+  // resolves the id with no server-side memory at all - which is the path a
+  // Worker isolate that never saw the search depends on.
+  const id = "3a1c0e6a-6b0f-4a6f-9d2e-2f4b8c0d1e2f";
+  const seen = [];
+  stub((url) => {
+    seen.push(url);
+    return { ...detailsPayload, random_key: id };
+  });
+  const out = await run("product_details", {
+    prk: id,
+    details_url: `https://api.torob.com/v4/base-product/details/?search_id=s9&prk=${id}`,
+  });
+  assert.equal(out.prk, id);
+  assert.equal(out.offer_count, 2);
+  // One call, straight to the details endpoint: no name search behind it.
+  assert.equal(seen.length, 1);
+  assert.match(seen[0], /\/details\//);
+});
+
+test("similar_products accepts the details_url as proof the id is real", async () => {
+  // Without a search or a memory of the product, the prk alone is nothing;
+  // the details URL that came with the card is what confirms it.
+  const id = "7c2d4f10-8a3b-4c5d-9e6f-1a2b3c4d5e6f";
+  stub((url) => {
+    if (url.includes("similar-base-product")) {
+      return {
+        results: [
+          {
+            random_key: "b-2",
+            name1: "آیفون ۱۳",
+            price: 48000000,
+            web_client_absolute_url: "/p/b-2/",
+            more_info_url: "https://api.torob.com/v4/base-product/details/?search_id=s3&prk=b-2",
+          },
+        ],
+        count: 1,
+      };
+    }
+    return searchPayload;
+  });
+  const out = await run("similar_products", {
+    prk: id,
+    details_url: `https://api.torob.com/v4/base-product/details/?search_id=s7&prk=${id}`,
+  });
+  assert.equal(out.found, 1);
+  assert.equal(out.products[0].name_fa, "آیفون ۱۳");
+});
+
 test("product_details explains that an unknown id needs a fresh search", async () => {
   // Nothing remembered and nothing findable: the error must name the way out
   // rather than saying "not found".

@@ -192,12 +192,18 @@ const detailsTool: ToolDef = {
   description:
     "One Torob product plus EVERY seller offer, sorted cheapest first, with each shop's score, vote count, " +
     "delivery and discount info. This is the call that answers 'who sells this cheapest' and 'is that shop " +
-    "any good'. Pass the prk from a search_products result, or a full torob.com product URL. " +
+    "any good'. Pass the prk from a search_products result plus that card's details_url, or a full " +
+    "torob.com product URL. " +
     "An offer with available false is out of stock; price_unreliable is Torob's own warning about that price.",
   inputSchema: {
     type: "object",
     properties: {
       prk: { type: "string", description: "Product id from a search_products card (or a torob.com /p/<id>/ URL)." },
+      details_url: {
+        type: "string",
+        description:
+          "The details_url from the same card. Pass it back with the prk and the product opens with no lookup: Torob's id alone is not an address.",
+      },
       max_offers: { type: "number", description: "How many seller offers to return (default 10, max 30)." },
     },
     required: ["prk"],
@@ -206,7 +212,7 @@ const detailsTool: ToolDef = {
     const prk = str(args.prk).trim();
     if (!prk) throw usageError("product_details needs a prk - the product id from a search_products card.");
     const maxOffers = clampLimit(args.max_offers, 10, 30);
-    const found = await productDetails(prk);
+    const found = await productDetails(prk, { detailsUrl: args.details_url });
     const cheapest = found.cheapest_offer;
     const best = found.best_rated_offer;
 
@@ -413,11 +419,17 @@ const similarTool: ToolDef = {
     "Products Torob considers comparable to the one you pass, cheapest first as cards. " +
     "This is the 'that one is too expensive, what else?' call. " +
     "The product must be one this server has already returned - Torob cannot look up a product by id alone, " +
-    "so search_products or product_details must come first.",
+    "so search_products or product_details must come first, and the details_url from that result should come " +
+    "back with the prk.",
   inputSchema: {
     type: "object",
     properties: {
       prk: { type: "string", description: "A product id from a search_products card or a product_details response." },
+      details_url: {
+        type: "string",
+        description:
+          "The details_url from the same card. Pass it back with the prk and no record of the product is needed on this server.",
+      },
       limit: { type: "number", description: "How many similar products (default 10, max 24)." },
     },
     required: ["prk"],
@@ -426,7 +438,7 @@ const similarTool: ToolDef = {
     const prk = str(args.prk).trim();
     if (!prk) throw usageError("similar_products needs a prk this server has already returned.");
     const limit = clampLimit(args.limit, 10, 24);
-    const products = await similarProducts(prk, limit);
+    const products = await similarProducts(prk, limit, { detailsUrl: args.details_url });
     return {
       prk,
       found: products.length,

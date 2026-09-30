@@ -33,6 +33,7 @@ test("instructions name no tool that does not exist", () => {
     "budget_toman",
     "suggested_categories",
     "prk",
+    "details_url",
   ]);
   for (const token of INSTRUCTIONS.match(/\b[a-z][a-z0-9]*_[a-z_]+\b/g) ?? []) {
     assert.ok(

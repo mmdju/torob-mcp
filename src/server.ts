@@ -6,6 +6,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { UpstreamError } from "./http.js";
+import { setWaitUntil, type WaitUntil } from "./project.js";
 import { READ_ONLY, TOOLS } from "./tools.js";
 
 export const VERSION = "0.2.0";
@@ -29,7 +30,8 @@ export const INSTRUCTIONS = [
   "slugs. Pass those slugs back in filters, or use min_price_toman / max_price_toman for a price window. " +
   "Torob ignores an unknown slug and answers unfiltered, so an unknown one is refused here instead.",
   "Product ids are only usable after this server has returned them: Torob cannot look up a product by id " +
-  "alone. Search for the product first, then pass the prk to product_details or similar_products.",
+  "alone. Search for the product first, then pass both the prk and the details_url from that card back to " +
+  "product_details or similar_products - the URL makes the id resolve with no memory involved.",
   "price_toman 0, or available false, means out of stock - never free. An offer flagged price_unreliable " +
   "is Torob's own warning about that number; say so instead of treating it as a bargain.",
   "An empty result is not proof a product does not exist - the wording may simply be wrong. When a search " +
@@ -43,7 +45,7 @@ export const INSTRUCTIONS = [
   "web API only.",
 ].join(" ");
 
-export function buildServer(): Server {
+export function buildServer(ctx?: WaitUntil): Server {
   const server = new Server(
     { name: "torob-mcp", version: VERSION },
     { capabilities: { tools: {} }, instructions: INSTRUCTIONS }
@@ -69,6 +71,9 @@ export function buildServer(): Server {
     }
     try {
       const args = (req.params.arguments || {}) as Record<string, unknown>;
+      // Anything a tool writes to the per-colo cache has to outlive this
+      // response, and in a Worker only `waitUntil` can promise that.
+      setWaitUntil(ctx ? (promise) => ctx.waitUntil(promise) : null);
       const data = await tool.run(args);
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     } catch (err) {
