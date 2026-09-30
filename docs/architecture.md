@@ -22,7 +22,7 @@ What this means:
 
 - **Stateless.** Every request stands alone - no sessions, no accounts, nothing to log in to.
 - **Read-only.** All 9 tools carry `readOnlyHint`. Nothing here can change, delete or post anything, and no shop is ever contacted.
-- **No storage.** The only memory is a short-lived response cache (minutes, per isolate) and a small map of product ids this server handed out, so a `prk` can be resolved back to its seller list. Prices are re-read from Torob every time the cache expires.
+- **No storage.** The only memory is a short-lived response cache (minutes, per isolate, with a 12MB byte budget so one 1.4MB details payload cannot fill the isolate) and a small map of product ids this server handed out, so a `prk` can be resolved back to its seller list. A name and details URL learned from a search also travel through the per-colo Cache API, and the filter groups a query advertised are remembered for 30 minutes. Prices are re-read from Torob every time the cache expires.
 - **Projected, not passed through.** A Torob search page is roughly 70KB of ranking metadata, experiment ids and ad plumbing. Every tool returns a compact record built by the server's projection layer instead.
 - **Rate-limit aware.** Upstream calls are serialized with a gap, retried on transient failures with backoff, and abandoned fast on a hard failure - the MCP client usually times out before a long retry loop finishes. Torob does not throttle with a 429; a caller that goes too fast gets a bot challenge, handled below.
 - **Challenges are not evaded.** Torob's edge answers some clients with a bot challenge. This server reads the JSON API only and never solves a challenge; a challenged response is reported as a clear, actionable error instead of being parsed into an empty result.
@@ -33,9 +33,10 @@ Torob does not expose a product-by-id endpoint. A product id alone is **not** an
 
 What works is the `more_info_url` each search row carries: a ready-made absolute details URL that already contains the `search_id` needed to open the product. So:
 
-1. `search_products` returns cards, and remembers each row's details URL against its `prk`.
-2. `product_details(prk)` uses that remembered URL directly - one search, one details call.
-3. If the id is unknown to this instance (a fresh isolate, a restart, an old id), the server falls back to searching by the product's **name** and matches on the id again.
+1. `search_products` returns cards - each carrying its `details_url` - and remembers each row's details URL against its `prk`.
+2. `product_details(prk, details_url)` opens the product with no lookup at all: the URL the caller echoes back carries what the endpoint needs, which is the only path that works on an isolate that never saw the search.
+3. Without the URL, the server falls back to what it remembers (in-process map, then the per-colo cache), then to searching by the product's **name** and matching the id again.
+4. Last, it tries the details endpoint with the id alone. Whatever answered, `resolved_by` says which path it was - `remembered`, `details-url`, `exact-id`, `name-search` or `id-only` - so a name match is never presented as the exact id.
 
 The seller list - the reason a Torob MCP exists - lives at `products_info.result[]` upstream ("فروشنده‌ها"). It is projected into a first-class `offers[]` array, not flattened into a string.
 
@@ -56,7 +57,8 @@ So the server treats a challenge as a cooldown, not a failure to retry:
 
 The projection layer exists because a well-formed response can still be wrong in a way that reads as an answer. Three were found and fixed by live testing, not by reading code:
 
-- **A product id is not an address upstream, and not a search term.** Handing a search result's `prk` back as a query returns nothing. The server remembers the details URL it handed out, and shares the product's name through the per-colo Cache API so a *different* isolate can still re-resolve it.
+- **A product id is not an address upstream, and not a search term.** Handing a search result's `prk` back as a query returns nothing. The server remembers the details URL it handed out, and shares the product's name through the per-colo Cache API so a *different* isolate can still re-resolve it - but the card's `details_url` is the path that needs no memory at all, and a name match is reported as such rather than passed off as the same id.
+- **A filter value is not a filter until upstream accepts it.** Torob ignores a slug or value it does not know and answers *unfiltered*, which reads as a filtered answer. Every search carries the filter groups it really accepts, with the values each takes, and a value outside that list is refused with the real ones.
 - **Ids arrive as both numbers and strings.** Province and city ids are numeric; a string-only coercion dropped every row of a perfectly good response, and the tool reported "no provinces exist" while upstream had 30.
 - **A field name guessed wrong returns an empty list, not an error.** `title` versus `name` on the location endpoints produced a clean `[]`. Every endpoint's shape was therefore verified against a live response before its tool shipped.
 

@@ -79,6 +79,7 @@ const detailsRow = {
         price_text: "۸۲٫۰۰۰٫۰۰۰ تومان",
         availability: true,
         is_price_unreliable: false,
+        postage_fee: "هزینه ارسال رایگان",
         more_info: { free_shipping: true, payment_on_delivery: true, same_day_delivery: "تهران" },
       },
       {
@@ -92,6 +93,13 @@ const detailsRow = {
         price_text_striked: "۸۵٫۰۰۰٫۰۰۰ تومان",
         availability: true,
         is_price_unreliable: true,
+        postage_fee: "هزینه ارسال ۷۰٫۰۰۰ تومان",
+        guarantee_info: { status: "enabled" },
+        installment: { providers: [{ name: "بلوبانک" }, { short_title: "تارا" }] },
+        is_adv: true,
+        last_price_change_date: "۳ روز پیش",
+        has_public_torob_profile: true,
+        shop_score_percentile: 42,
         more_info: { free_shipping: false },
       },
       {
@@ -155,6 +163,30 @@ test("a discounted offer keeps its was-price and Torob's own warning", () => {
   assert.equal(cheap.was_price_text, "۸۵٫۰۰۰٫۰۰۰ تومان");
   assert.equal(cheap.price_unreliable, true);
   assert.equal(cheap.free_shipping, false);
+});
+
+test("a seller offer keeps postage, guarantee and instalment as the shop stated them", () => {
+  // Live fields measured on 2026-09-24. The postage is a Persian line, not a
+  // number, and the delivered price is where it becomes comparable.
+  const offers = offersOf(detailsRow);
+  const cheap = offers.find((o) => o.shop_name === "فروشگاه ارزان");
+  assert.equal(cheap.postage_text, "هزینه ارسال ۷۰٫۰۰۰ تومان");
+  assert.equal(cheap.postage_fee_toman, 70000);
+  assert.equal(cheap.delivered_price_toman, 79070000);
+  assert.equal(cheap.guarantee, "enabled");
+  assert.deepEqual(cheap.installment_providers, ["بلوبانک", "تارا"]);
+  assert.equal(cheap.is_adv, true);
+  assert.equal(cheap.last_price_change_date, "۳ روز پیش");
+  assert.equal(cheap.has_public_torob_profile, true);
+  assert.equal(cheap.shop_score_percentile, 42);
+});
+
+test("free postage adds nothing, and an unstated fee is not invented", () => {
+  const offers = offersOf(detailsRow);
+  const dk = offers.find((o) => o.shop_name === "دیجی‌کالا");
+  assert.equal(dk.postage_text, "هزینه ارسال رایگان");
+  assert.equal(dk.postage_fee_toman, null);
+  assert.equal(dk.delivered_price_toman, dk.price_toman);
 });
 
 test("offersOf returns an empty list when there are no sellers", () => {

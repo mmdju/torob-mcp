@@ -4,6 +4,7 @@ import {
   availableFrom,
   clampLimit,
   clampPage,
+  foldKey,
   formatToman,
   num,
   pageClampNote,
@@ -13,6 +14,19 @@ import {
   toman,
   tomanFromText,
 } from "../dist/normalize.js";
+
+test("foldKey makes the same words compare equal across keyboards", () => {
+  // Torob's own search treats these spellings as the same words; the server's
+  // cache keys and name matching have to agree with it, not with a byte
+  // comparison that would call them different products.
+  assert.equal(foldKey("آيفون ۱۳"), foldKey("آیفون 13"));
+  assert.equal(foldKey("كتاب"), foldKey("کتاب"));
+  assert.equal(foldKey("iPhone"), "iphone");
+  assert.equal(foldKey("  a   b "), "a b");
+  // A ZWNJ is a real difference (نیم‌فاصله is not نیم فاصله), so it survives.
+  assert.notEqual(foldKey("نیم‌فاصله"), foldKey("نیم فاصله"));
+  assert.equal(foldKey(null), "");
+});
 
 test("str keeps strings and falls back for anything else", () => {
   assert.equal(str("سلام"), "سلام");

@@ -26,6 +26,24 @@ export interface Offer {
   payment_on_delivery: boolean | null;
   same_day_delivery: string | null;
   url: string | null;
+  /** Torob's own ad flag for this offer. */
+  is_adv: boolean;
+  /** Torob's postage line as sent, e.g. "هزینه ارسال ۷۰٫۰۰۰ تومان". */
+  postage_text: string | null;
+  /** Postage parsed from that line; null when it is free or unstated. */
+  postage_fee_toman: Toman | null;
+  /** price_toman + stated postage; equals the price when postage is free. */
+  delivered_price_toman: Toman | null;
+  /** "enabled" / "disabled" from Torob's guarantee_info. */
+  guarantee: string | null;
+  /** Instalment (BNPL) providers Torob lists for this offer, by name. */
+  installment_providers: string[];
+  /** Persian relative time, e.g. "۲ ساعت پیش". */
+  last_price_change_date: string | null;
+  /** Whether the shop has a public Torob profile page. */
+  has_public_torob_profile: boolean | null;
+  /** The shop's percentile on Torob, 0-100, when sent. */
+  shop_score_percentile: number | null;
 }
 
 /** A product as it appears in search results: the cheapest offer only. */
@@ -42,6 +60,10 @@ export interface ProductCard {
   image_count: number;
   badges: string[];
   url: string;
+  /** Torob's ad flag for this row. */
+  is_adv: boolean;
+  /** Torob's own details URL for this row; pass it back as `details_url`. */
+  details_url: string | null;
 }
 
 /** One product plus its full seller list. */
@@ -51,11 +73,16 @@ export interface ProductDetails extends ProductCard {
   /** Cheapest minus dearest available offer. */
   price_spread_toman: Toman | null;
   cheapest_offer: Offer | null;
+  /** The highest shop_score among available offers; ties break on votes. */
   best_rated_offer: Offer | null;
+  /** Cheapest once stated postage is added. */
+  cheapest_delivered_offer: Offer | null;
+  /** How the id was found: remembered, details-url, exact-id, name-search, id-only. */
+  resolved_by: string;
   attribution: string;
 }
 
-/** A filter group this search accepts. Read the slugs off these. */
+/** A filter group this search accepts. Read the slugs and options off these. */
 export interface FilterGroup {
   title: string;
   /** Pass this back in search_products' `filters` object. */
@@ -63,18 +90,23 @@ export interface FilterGroup {
   type: string;
   /** How many values the group has. */
   values: number;
-  /** For grouped filters like brand, the endpoint that lists the values. */
+  /** The values to pass back; absent when the group takes none (a range). */
+  options?: { name: string; value: string }[];
+  /** True when `options` is a preview rather than the whole list. */
+  options_truncated?: boolean;
+  /** For grouped filters like brand, the endpoint that lists every value. */
   values_url?: string;
-  sample?: { slug: string; label: string }[];
 }
 
 export interface SearchResponse {
   query: string;
-  sort: "popularity" | "price" | "newest";
+  sort: "popularity" | "price" | "expensive" | "newest" | "sellers";
   sort_meaning: string;
   /** Present only when a filter was actually applied. */
   filters_applied?: Record<string, string>;
   total_matches: number;
+  /** Torob's own count is approximate; page with has_next_page. */
+  total_matches_note: string;
   page: number;
   page_count: number;
   has_next_page: boolean;
@@ -102,8 +134,12 @@ export interface DetailsResponse {
   price_spread_toman: Toman | null;
   cheapest_offer: Offer | null;
   best_rated_offer: Offer | null;
+  cheapest_delivered_offer: Offer | null;
+  resolved_by: string;
   /** Present when the cheapest and the best-rated are different shops. */
   cheapest_vs_best_rated?: string;
+  /** Present when postage changes which shop is cheapest overall. */
+  cheapest_vs_delivered?: string;
   offers: Offer[];
   attribution: string;
 }
@@ -139,10 +175,15 @@ export interface BestValueResponse {
   query: string;
   budget_toman: Toman | null;
   total_matches: number;
+  /** Torob's own count is approximate; page with has_next_page. */
+  total_matches_note: string;
   out_of_stock_excluded: number;
   matches_in_budget: number;
   best_value: ProductCard | null;
   picks: ProductCard[];
+  /** Present with include_delivery: the cheapest picks with their postage. */
+  delivered?: { prk: string; name_fa: string | null; cheapest_price_toman: Toman | null; cheapest_delivered_offer: Offer | null }[];
+  delivery_note?: string;
   attribution: string;
   /** Present when nothing fit: says what the cheapest in-stock result was. */
   budget_note?: string;
@@ -153,6 +194,8 @@ export interface SuggestResponse {
   query: string;
   suggestions: string[];
   next: string;
+  /** Present when shop entries were dropped from the autocomplete answer. */
+  note?: string;
 }
 
 export interface SimilarResponse {

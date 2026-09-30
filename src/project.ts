@@ -16,11 +16,12 @@
 //    "فروشنده‌ها"). That list is the reason a Torob MCP exists at all, so it
 //    gets a first-class shape rather than being flattened into a string.
 
-import { ATTRIBUTION, MIN_SHOP_VOTES, TOROB_API, TTL } from "./config.js";
+import { ATTRIBUTION, MIN_SHOP_VOTES, SORT_PARAMS, TOROB_API, TTL, type Sort } from "./config.js";
 import { cached } from "./cache.js";
 import { UpstreamError, torobGet } from "./http.js";
 import {
   availableFrom,
+  foldKey,
   formatToman,
   num,
   productUrl,
@@ -49,6 +50,24 @@ export interface Offer {
   payment_on_delivery: boolean | null;
   same_day_delivery: string | null;
   url: string | null;
+  /** Torob's own ad flag for this offer. */
+  is_adv: boolean;
+  /** Torob's postage line as sent, e.g. "هزینه ارسال ۷۰٫۰۰۰ تومان". */
+  postage_text: string | null;
+  /** Postage parsed from that line; null when it is free or unstated. */
+  postage_fee_toman: number | null;
+  /** price_toman + stated postage; equals price when postage is free/unstated. */
+  delivered_price_toman: number | null;
+  /** "enabled" / "disabled" from Torob's guarantee_info. */
+  guarantee: string | null;
+  /** BNPL providers Torob lists for this offer, by name. */
+  installment_providers: string[];
+  /** Persian relative time, e.g. "۲ ساعت پیش". */
+  last_price_change_date: string | null;
+  /** Whether the shop has a public Torob profile page. */
+  has_public_torob_profile: boolean | null;
+  /** The shop's percentile on Torob, 0-100, when sent. */
+  shop_score_percentile: number | null;
 }
 
 export interface ProductCard {
@@ -64,6 +83,8 @@ export interface ProductCard {
   image_count: number;
   badges: string[];
   url: string;
+  /** Torob's ad flag for this row. */
+  is_adv: boolean;
   /**
    * Torob's own details URL for this row. It carries the `search_id` the
    * details endpoint wants, so passing it back to product_details /
@@ -80,6 +101,10 @@ export interface ProductDetails extends ProductCard {
   price_spread_toman: number | null;
   cheapest_offer: Offer | null;
   best_rated_offer: Offer | null;
+  /** Cheapest offer once stated postage is added. */
+  cheapest_delivered_offer: Offer | null;
+  /** How this id was resolved: exact-id, name-search, details-url, remembered or id-only. */
+  resolved_by: string;
   attribution: string;
 }
 
@@ -100,6 +125,13 @@ interface RawOffer {
   availability?: unknown;
   is_price_unreliable?: unknown;
   page_url?: unknown;
+  is_adv?: unknown;
+  postage_fee?: unknown;
+  guarantee_info?: unknown;
+  installment?: unknown;
+  last_price_change_date?: unknown;
+  has_public_torob_profile?: unknown;
+  shop_score_percentile?: unknown;
   more_info?: {
     payment_on_delivery?: unknown;
     free_shipping?: unknown;
@@ -119,6 +151,7 @@ interface RawProduct {
   web_client_absolute_url?: unknown;
   more_info_url?: unknown;
   badges?: unknown;
+  is_adv?: unknown;
   product_page_url?: unknown;
   products_info?: { result?: unknown };
 }
@@ -205,6 +238,7 @@ export function toCard(row: RawProduct): ProductCard | null {
     image_count: Math.max(0, Math.round(num(row.image_count, 0))),
     badges: badgesOf(row.badges),
     url: productUrl(row.web_client_absolute_url, prk) ?? `https://torob.com/p/${prk}/`,
+    is_adv: row.is_adv === true,
     details_url: detailsUrlOf(row.more_info_url),
   };
 }
@@ -270,6 +304,26 @@ function rememberDetailUrl(row: RawProduct): void {
   }
 }
 
+// Torob sends the postage as a Persian line ("هزینه ارسال ۷۰٫۰۰۰ تومان",
+// "هزینه ارسال رایگان") rather than a number. Keep the text and parse the
+// number out of it; an unreadable fee stays null and never blocks the offer.
+function postageOf(raw: RawOffer): { text: string | null; fee: number | null } {
+  const text = short(raw.postage_fee, 60);
+  if (!text) return { text: null, fee: null };
+  return { text, fee: tomanFromText(text) };
+}
+
+function installmentProvidersOf(raw: RawOffer): string[] {
+  const providers = (raw.installment as { providers?: unknown } | null | undefined)?.providers;
+  if (!Array.isArray(providers)) return [];
+  const out: string[] = [];
+  for (const p of providers) {
+    const name = short((p as any)?.name ?? (p as any)?.short_title, 60);
+    if (name) out.push(name);
+  }
+  return out.slice(0, 5);
+}
+
 function toOffer(raw: RawOffer): Offer | null {
   const shop = short(raw.shop_name, 80);
   if (!shop) return null;
@@ -277,6 +331,9 @@ function toOffer(raw: RawOffer): Offer | null {
   // present. Never invent a price from a shop name.
   const price = num(raw.price, 0) > 0 ? Math.round(num(raw.price, 0)) : tomanFromText(raw.price_text ?? raw.price_string);
   const more = raw.more_info ?? {};
+  const postage = postageOf(raw);
+  const guarantee = short((raw.guarantee_info as { status?: unknown } | null | undefined)?.status, 20);
+  const percentile = num(raw.shop_score_percentile, NaN);
   return {
     shop_name: shop,
     shop_city: short(raw.shop_name2, 60),
@@ -292,6 +349,15 @@ function toOffer(raw: RawOffer): Offer | null {
     payment_on_delivery: more.payment_on_delivery === undefined ? null : more.payment_on_delivery === true,
     same_day_delivery: short(more.same_day_delivery, 120),
     url: str(raw.page_url).startsWith("http") ? str(raw.page_url) : null,
+    is_adv: raw.is_adv === true,
+    postage_text: postage.text,
+    postage_fee_toman: postage.fee,
+    delivered_price_toman: price === null ? null : price + (postage.fee ?? 0),
+    guarantee,
+    installment_providers: installmentProvidersOf(raw),
+    last_price_change_date: short(raw.last_price_change_date, 60),
+    has_public_torob_profile: typeof raw.has_public_torob_profile === "boolean" ? raw.has_public_torob_profile : null,
+    shop_score_percentile: Number.isFinite(percentile) ? Math.round(percentile) : null,
   };
 }
 
@@ -320,7 +386,9 @@ export function offersOf(row: RawProduct): Offer[] {
 // ----------------------------------------------------------------- endpoints
 
 function searchKey(q: string, page: number, sort: string, category: string, shopType: string, filters: string): string {
-  return `s:${q}|${page}|${sort}|${category}|${shopType}|${filters}`;
+  // Folded so two spellings of one query share one cache entry and one upstream
+  // call ("آيفون" / "آیفون").
+  return `s:${foldKey(q)}|${page}|${sort}|${category}|${shopType}|${filters}`;
 }
 
 export interface SearchOptions {
@@ -363,42 +431,68 @@ function categoriesOf(raw: unknown): { id: string; title: string }[] {
   return out.slice(0, 8);
 }
 
+export interface FilterOption {
+  /** The label the search UI shows. */
+  name: string;
+  /** The value to pass back in `filters` for this option. */
+  value: string;
+}
+
 export interface FilterGroup {
   title: string;
   slug: string;
   type: string;
-  /** How many values this group has; the values themselves are not inlined. */
+  /** How many values this group advertises. */
   values: number;
-  /** For a brand group, the endpoint that lists its values. */
+  /** The values to pass back in `filters`; absent when the group takes none. */
+  options?: FilterOption[];
+  /** True when `options` is a preview rather than the whole list. */
+  options_truncated?: boolean;
+  /** For a brand group, the endpoint that lists all its values. */
   values_url?: string;
-  /** A few example values, so a caller can see the shape without a call. */
-  sample?: { slug: string; label: string }[];
 }
 
-// filters1 are range/select groups, filters2 are toggles, attributes are the
-// grouped ones (brand, colour, ...) that carry their own values endpoint.
-// All three are collapsed into one flat list because that is how a caller
-// thinks about them: "what can I narrow this search by".
+// Groups whose items are a fixed set of choices ship their option list, so a
+// caller can pass one back without a second call. Brand groups are a preview
+// plus their own values endpoint (their full list is not inlined), and price
+// groups are a range, not choices: they compile to price__gt / price__lt.
+const OPTION_PREVIEW = 10;
+const OPTION_CAP = 60;
+
+function optionValueOf(item: unknown): string {
+  // A brand item carries the slug a filter needs; a choice item carries value.
+  if (item && typeof item === "object" && "value" in (item as object)) return str((item as any).value);
+  return str((item as any)?.slug);
+}
+
 function filterGroupsOf(raw: RawSearch): FilterGroup[] {
   const out: FilterGroup[] = [];
   const brief = (g: any) => {
     const slug = str(g?.slug).trim();
     if (!slug) return null;
+    const type = str(g?.type, "unknown");
     const items = Array.isArray(g?.items) ? g.items : [];
+    const options: FilterOption[] = [];
+    if (type !== "price") {
+      for (const item of items) {
+        const value = optionValueOf(item);
+        const name =
+          short((item as any)?.name ?? (item as any)?.name1 ?? (item as any)?.title ?? (item as any)?.name2, 80) ?? value;
+        if (name || value) options.push({ name, value });
+        if (options.length >= OPTION_CAP) break;
+      }
+    }
+    // A brand group's list is a preview (values_url has the rest), so it is
+    // never treated as the complete set when a caller's value is checked.
+    const truncated = type === "brand" ? true : items.length > options.length;
     return {
       title: str(g?.title, slug),
       slug,
-      type: str(g?.type, "unknown"),
+      type,
       values: items.length,
+      ...(options.length ? { options: type === "brand" ? options.slice(0, OPTION_PREVIEW) : options } : {}),
+      ...(options.length && truncated ? { options_truncated: true } : {}),
       ...(str(g?.url) ? { values_url: str(g.url) } : {}),
-      ...(items.length
-        ? {
-            sample: items.slice(0, 3).map((i: any) => ({
-              slug: str(i?.slug),
-              label: str(i?.name1 ?? i?.title ?? i?.value),
-            })),
-          }
-        : {}),
     } satisfies FilterGroup;
   };
   for (const group of [...(raw.filters1 ?? []), ...(raw.filters2 ?? []), ...(raw.attributes ?? [])]) {
@@ -409,9 +503,63 @@ function filterGroupsOf(raw: RawSearch): FilterGroup[] {
   return out;
 }
 
+// The filter keys a response says it accepts: each group's own slug, plus the
+// price group's price__gt / price__lt. `q` is the query itself and `sort` has
+// its own argument, so neither is a filter key.
+export function filterKeyMap(groups: FilterGroup[]): Map<string, FilterGroup> {
+  const map = new Map<string, FilterGroup>();
+  for (const g of groups) {
+    if (g.slug === "q") continue;
+    if (g.type === "price") {
+      map.set("price__gt", g);
+      map.set("price__lt", g);
+      continue;
+    }
+    map.set(g.slug, g);
+  }
+  return map;
+}
+
+// The filter groups a search taught us, remembered for the same query and the
+// same narrowing (category/city/shop type/brand). A later call in that exact
+// context can be validated before spending an upstream request; any other
+// context falls back to the fresh response, which is always the authority.
+const filterGroupsMemory = new Map<string, FilterGroup[]>();
+const FILTER_MEMORY_ENTRIES = 200;
+const FILTER_MEMORY_PREFIX = "filters/";
+const FILTER_MEMORY_TTL_SECONDS = 30 * 60;
+
+export function filterMemoryKey(
+  q: string,
+  opts?: { category?: string; city?: string; shopType?: string; brand?: string }
+): string {
+  return [foldKey(q), opts?.category ?? "", opts?.city ?? "", opts?.shopType ?? "", opts?.brand ?? ""].join("|");
+}
+
+export function rememberFilterGroups(key: string, groups: FilterGroup[]): void {
+  if (filterGroupsMemory.size >= FILTER_MEMORY_ENTRIES) {
+    const oldest = filterGroupsMemory.keys().next();
+    if (!oldest.done) filterGroupsMemory.delete(oldest.value);
+  }
+  filterGroupsMemory.set(key, groups);
+  keepAlive(cacheSet(`${FILTER_MEMORY_PREFIX}${encodeURIComponent(key)}`, groups, FILTER_MEMORY_TTL_SECONDS));
+}
+
+export async function rememberedFilterGroups(key: string): Promise<FilterGroup[] | null> {
+  const local = filterGroupsMemory.get(key);
+  if (local) return local;
+  const shared = await cacheGet(`${FILTER_MEMORY_PREFIX}${encodeURIComponent(key)}`);
+  return Array.isArray(shared) ? (shared as FilterGroup[]) : null;
+}
+
 export async function searchProducts(opts: SearchOptions): Promise<SearchResult> {
   const raw = await searchRaw(opts);
-  return projectSearch(raw, opts);
+  const result = projectSearch(raw, opts);
+  rememberFilterGroups(
+    filterMemoryKey(opts.q, { category: opts.category, city: opts.city, shopType: opts.shopType, brand: opts.brand }),
+    result.available_filters
+  );
+  return result;
 }
 
 // The upstream payload, cached. Kept separate from the projection so the
@@ -425,7 +573,8 @@ async function searchRaw(opts: SearchOptions): Promise<RawSearch> {
       // Torob pages upstream are 0-based; this server takes 1-based pages.
       page: String(Math.max(0, opts.page - 1)),
       size: "24",
-      sort: opts.sort,
+      // Upstream's own sort vocabulary; the tool-facing names are stable.
+      sort: SORT_PARAMS[opts.sort as Sort] ?? "",
     });
     if (opts.category) params.set("category", opts.category);
     if (opts.brand) params.set("brand", opts.brand);
@@ -484,18 +633,75 @@ async function detailsRaw(moreInfoUrl: string, prk: string): Promise<RawProduct>
 // carries name1, and a search for it returns the product again, usually first
 // and always with a fresh details URL - so the name is what re-resolves an id
 // on a cold isolate. The caller's own wording is tried after it.
-async function rowForId(prk: string, ...queries: (string | null | undefined)[]): Promise<RawProduct | null> {
+//
+// A name search can drift onto a similar product ("A57" vs "A37"), and almost
+// is a wrong answer when the answer is a price. An exact id match is proof; a
+// first row is accepted only when its folded name really is the remembered
+// name, and the caller is told it was matched by name rather than by id.
+interface FoundRow {
+  row: RawProduct;
+  matched_exact: boolean;
+}
+
+const NAME_TOKENS_RE = /[^\p{L}\p{N}]+/u;
+
+function nameTokens(s: string): string[] {
+  return foldKey(s)
+    .split(NAME_TOKENS_RE)
+    .filter((t) => t.length > 1);
+}
+
+function sameNameTokens(a: string[], b: string[]): boolean {
+  if (a.length < 2 || b.length < 2) return false;
+  const shared = a.filter((t) => b.includes(t)).length;
+  const dice = (2 * shared) / (a.length + b.length);
+  if (dice < 0.9) return false;
+  const numeric = (ts: string[]) => ts.filter((t) => /\d/.test(t)).sort().join(",");
+  return numeric(a) === numeric(b);
+}
+
+function nameMatches(knownName: string | null, row: RawProduct): boolean {
+  const target = foldKey(knownName ?? "");
+  if (!target) return false;
+  const targetTokens = nameTokens(target);
+  for (const candidate of [row.name1, row.name2]) {
+    const folded = foldKey(candidate);
+    if (!folded) continue;
+    if (folded === target) return true;
+    if (sameNameTokens(targetTokens, nameTokens(folded))) return true;
+  }
+  return false;
+}
+
+/** A shared cap on the extra upstream lookups one tool call may make. */
+export interface LookupBudget {
+  left: number;
+}
+
+function spend(budget: LookupBudget | undefined): boolean {
+  if (!budget) return true;
+  if (budget.left <= 0) return false;
+  budget.left -= 1;
+  return true;
+}
+
+async function rowForId(
+  prk: string,
+  knownName: string | null,
+  budget: LookupBudget | undefined,
+  ...queries: (string | null | undefined)[]
+): Promise<FoundRow | null> {
   const attempts = queries
     .map((q) => str(q).trim())
     .filter((q, i, all) => q.length > 0 && all.indexOf(q) === i);
   for (const q of attempts) {
+    if (!spend(budget)) return null;
     const raw = await searchRaw({ q, page: 1, sort: "popularity" });
     const rows = Array.isArray(raw.results) ? (raw.results as RawProduct[]) : [];
     const exact = rows.find((r) => str(r.random_key) === prk);
-    if (exact) return exact;
-    // A name search can drift onto a similar product; the first row is the
-    // best available match and the caller still gets the real seller list.
-    if (rows[0]?.more_info_url) return rows[0];
+    if (exact) return { row: exact, matched_exact: true };
+    const first = rows[0];
+    if (first?.more_info_url && nameMatches(knownName, first)) return { row: first, matched_exact: false };
   }
   return null;
 }
@@ -567,12 +773,19 @@ export interface ProductDetailsOptions {
   detailsUrl?: unknown;
   /** The words the caller searched with, as a last-resort way back to the row. */
   query?: unknown;
+  /**
+   * Internal: a shared cap on the extra upstream lookups a batch (compare) may
+   * spend resolving ids. Omitted means no cap beyond the normal path.
+   */
+  lookupBudget?: LookupBudget;
 }
 
 interface ResolvedProduct {
   prk: string;
   url: string;
   card: ProductCard | null;
+  /** How the id was resolved; surfaced so a fuzzy match is never invisible. */
+  resolvedBy: string;
   /** Set only by the last-resort direct call, so it is not paid for twice. */
   raw?: RawProduct;
 }
@@ -587,24 +800,30 @@ function prkOnlyDetailsUrl(prk: string): string {
 // Four sources can supply it, tried in this order.
 async function detailsUrlForId(wanted: string, opts?: ProductDetailsOptions): Promise<ResolvedProduct> {
   const prk = idFrom(wanted);
+  const budget = opts?.lookupBudget;
 
   // 1. Whatever this isolate, or another one in this colo, already learned.
   const known = await rememberedInfo(prk);
-  if (known.url) return { prk, url: known.url, card: null };
+  if (known.url) return { prk, url: known.url, card: null, resolvedBy: "remembered" };
 
   // 2. The details_url the caller echoed back. This is the path that needs no
   // memory at all, which is why every card carries the URL.
   const provided = detailsUrlOf(opts?.detailsUrl);
   if (provided) {
     rememberDetailUrl({ random_key: prk, more_info_url: provided } as RawProduct);
-    return { prk, url: provided, card: null };
+    return { prk, url: provided, card: null, resolvedBy: "details-url" };
   }
 
   // 3. The name the id was learned under, then the caller's own wording: a prk
   // is not a search term, a name is.
-  const row = await rowForId(prk, known.name, str(opts?.query));
-  if (row?.more_info_url) {
-    return { prk, url: str(row.more_info_url), card: toCard(row) };
+  const found = await rowForId(prk, known.name, budget, str(opts?.query));
+  if (found?.row.more_info_url) {
+    return {
+      prk,
+      url: str(found.row.more_info_url),
+      card: toCard(found.row),
+      resolvedBy: found.matched_exact ? "exact-id" : "name-search",
+    };
   }
 
   // 4. Last resort: ask the details endpoint for the id alone. Whether it
@@ -614,15 +833,24 @@ async function detailsUrlForId(wanted: string, opts?: ProductDetailsOptions): Pr
   // it still projects to a product: an empty answer to the id-only call is not
   // a product, and accepting it would hide the honest "search first" error
   // below, which is the one a caller can act on.
-  try {
-    const raw = await detailsRaw(prkOnlyDetailsUrl(prk), prk);
-    const answeredId = str(raw.random_key).trim();
-    const card = toCard(raw);
-    if (answeredId === prk || (!answeredId && card)) {
-      return { prk, url: prkOnlyDetailsUrl(prk), card, raw };
+  if (budget && budget.left <= 0) {
+    throw new UpstreamError(
+      `This call ran out of its shared lookup budget before it could open '${wanted}'. Open this product with ` +
+        `product_details on its own - pass its details_url if you have one - or run search_products for it first.`,
+      "usage"
+    );
+  }
+  if (spend(budget)) {
+    try {
+      const raw = await detailsRaw(prkOnlyDetailsUrl(prk), prk);
+      const answeredId = str(raw.random_key).trim();
+      const card = toCard(raw);
+      if (answeredId === prk || (!answeredId && card)) {
+        return { prk, url: prkOnlyDetailsUrl(prk), card, raw, resolvedBy: "id-only" };
+      }
+    } catch {
+      /* fall through to the honest error below */
     }
-  } catch {
-    /* fall through to the honest error below */
   }
 
   throw new UpstreamError(
@@ -662,7 +890,7 @@ export async function productDetails(
     }
     const prk = str(source.random_key ?? source.prk).trim();
     rememberDetailUrl({ random_key: prk, more_info_url: url } as RawProduct);
-    resolved = { prk, url, card: null };
+    resolved = { prk, url, card: null, resolvedBy: "provided-row" };
   }
 
   const raw = resolved.raw ?? (await detailsRaw(resolved.url, resolved.prk));
@@ -673,7 +901,28 @@ export async function productDetails(
   }
 
   const prices = offers.filter((o) => o.available && o.price_toman !== null).map((o) => o.price_toman as number);
-  const bestRated = offers.filter((o) => o.available && o.shop_score !== null)[0] ?? null;
+  // "Best rated" is the highest score, not the first scored offer in a list
+  // sorted cheapest-first (measured: the old pick put a 3.0 shop above a 5.0
+  // one whenever the cheaper shop came first). Ties break on votes, then price.
+  const bestRated =
+    offers
+      .filter((o) => o.available && o.shop_score !== null)
+      .sort(
+        (a, b) =>
+          (b.shop_score as number) - (a.shop_score as number) ||
+          b.shop_votes - a.shop_votes ||
+          (a.price_toman ?? Number.POSITIVE_INFINITY) - (b.price_toman ?? Number.POSITIVE_INFINITY)
+      )[0] ?? null;
+  // Cheapest once stated postage is added. Free and unstated postage both cost
+  // nothing extra here, which is why the note next to it says what it includes.
+  const delivered =
+    offers
+      .filter((o) => o.available && o.delivered_price_toman !== null)
+      .sort(
+        (a, b) =>
+          (a.delivered_price_toman as number) - (b.delivered_price_toman as number) ||
+          (a.price_toman ?? Number.POSITIVE_INFINITY) - (b.price_toman ?? Number.POSITIVE_INFINITY)
+      )[0] ?? null;
 
   return {
     ...base,
@@ -682,6 +931,8 @@ export async function productDetails(
     price_spread_toman: prices.length > 1 ? Math.max(...prices) - Math.min(...prices) : null,
     cheapest_offer: offers.find((o) => o.available && o.price_toman !== null) ?? null,
     best_rated_offer: bestRated,
+    cheapest_delivered_offer: delivered,
+    resolved_by: resolved.resolvedBy,
     attribution: ATTRIBUTION,
   };
 }
@@ -711,8 +962,8 @@ export async function similarProducts(
     const known = await rememberedInfo(prk);
     confirmed = known.url !== null;
     if (!confirmed) {
-      const row = await rowForId(prk, known.name, str(opts?.query));
-      confirmed = row !== null;
+      const found = await rowForId(prk, known.name, opts?.lookupBudget, str(opts?.query));
+      confirmed = found !== null;
     }
   }
   if (!confirmed) {
@@ -877,16 +1128,28 @@ export async function specialOffers(limit: number): Promise<SpecialOffer[]> {
   return out.slice(0, limit);
 }
 
-export async function suggestTerms(q: string): Promise<{ query: string; suggestions: string[] }> {
-  const raw = await cached(`sg:${q}`, TTL.suggest, () =>
+// Types Torob sends that name a business listing rather than a wording for a
+// product search (measured live: "phone" suggested phoneino.com and
+// phonex1.ir with suggestion_type business_profile_query). They are dropped:
+// a shop domain is not a query an agent should search Torob with.
+const NON_PRODUCT_SUGGESTION_TYPES = new Set(["business_profile_query"]);
+
+export async function suggestTerms(q: string): Promise<{ query: string; suggestions: string[]; dropped: number }> {
+  const raw = await cached(`sg:${foldKey(q)}`, TTL.suggest, () =>
     torobGet<unknown>(`/suggestion2/?q=${encodeURIComponent(q)}&source=next_desktop`)
   );
   const out: string[] = [];
+  let dropped = 0;
   if (Array.isArray(raw)) {
     for (const s of raw) {
       const text = short((s as any)?.text, 80);
-      if (text) out.push(text);
+      if (!text) continue;
+      if (NON_PRODUCT_SUGGESTION_TYPES.has(str((s as any)?.suggestion_type))) {
+        dropped += 1;
+        continue;
+      }
+      out.push(text);
     }
   }
-  return { query: q, suggestions: [...new Set(out)].slice(0, 10) };
+  return { query: q, suggestions: [...new Set(out)].slice(0, 10), dropped };
 }

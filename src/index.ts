@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { MAX_BODY_BYTES, PORT } from "./config.js";
-import { LANDING } from "./landing.js";
+import { LANDING, MCP_PAGE } from "./landing.js";
 import { buildServer, VERSION } from "./server.js";
 
 // Browser-based MCP clients cannot POST /mcp without CORS (same as worker.ts).
@@ -64,6 +64,10 @@ async function main() {
             try { await reqServer.close(); } catch { /* ignore */ }
           }
         });
+      } else if (req.method === "GET" && req.url === "/mcp") {
+        // Same page the Worker serves: a browser client that GETs the endpoint
+        // gets an explanation, not a 404.
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(MCP_PAGE);
       } else if (req.method === "GET" && req.url === "/health") {
         res
           .writeHead(200, { "content-type": "application/json" })

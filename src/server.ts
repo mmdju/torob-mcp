@@ -9,7 +9,7 @@ import { UpstreamError } from "./http.js";
 import { setWaitUntil, type WaitUntil } from "./project.js";
 import { READ_ONLY, TOOLS } from "./tools.js";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.3.0";
 
 // Server-level guidance: cheaper than repeating it in every tool description,
 // and it steers the agent before it picks a tool at all. It is the first thing
@@ -27,8 +27,13 @@ export const INSTRUCTIONS = [
   "'is that shop reliable' call product_details - that is where the full seller list, shop scores and " +
   "vote counts live.",
   "Every search returns available_filters - the filter groups that search really accepts, with their " +
-  "slugs. Pass those slugs back in filters, or use min_price_toman / max_price_toman for a price window. " +
-  "Torob ignores an unknown slug and answers unfiltered, so an unknown one is refused here instead.",
+  "slugs and the values each takes. Pass those values back in filters, or use min_price_toman / " +
+  "max_price_toman for a price window. Torob ignores a slug or value it does not know and answers " +
+  "unfiltered, so anything the fresh search does not advertise is refused here instead.",
+  "Torob's total_matches is its own count and is approximate - it changes between identical requests. " +
+  "Page with has_next_page instead of quoting the number.",
+  "A product id resolves by exact match. When only a name search can re-find it, product_details says " +
+  "resolved_by rather than presenting the match as the same id.",
   "Product ids are only usable after this server has returned them: Torob cannot look up a product by id " +
   "alone. Search for the product first, then pass both the prk and the details_url from that card back to " +
   "product_details or similar_products - the URL makes the id resolve with no memory involved.",

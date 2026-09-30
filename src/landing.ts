@@ -76,7 +76,7 @@ export const LANDING = `<!DOCTYPE html>
   <p class="sub">مقایسهٔ قیمت ترب، در دسترس عامل‌های هوش مصنوعی. فقط‌خواندنی، بدون کلید API.</p>
 
   <div>
-    <span class="pill">۵ ابزار</span>
+    <span class="pill">۹ ابزار</span>
     <span class="pill">Cloudflare Workers</span>
     <span class="pill">بدون ورود</span>
     <span class="pill">قیمت‌ها به تومان</span>
@@ -91,10 +91,14 @@ export const LANDING = `<!DOCTYPE html>
     <h2>ابزارها</h2>
     <ul>
       <li><code>torob_suggest</code> — تبدیل حرف‌های خودکار به عبارت‌های واقعی جستجو</li>
-      <li><code>search_products</code> — جستجو با کارت‌های فشرده (ارزان‌ترین پیشنهاد به تومان)</li>
-      <li><code>product_details</code> — یک محصول به‌همراه <strong>همهٔ فروشنده‌ها</strong>، امتیاز و رأی هر فروشگاه</li>
+      <li><code>search_products</code> — جستجو با کارت‌های فشرده و فیلترهای واقعی ترب</li>
+      <li><code>product_details</code> — یک محصول به‌همراه <strong>همهٔ فروشنده‌ها</strong>، امتیاز، ارسال و گارانتی</li>
+      <li><code>similar_products</code> — «این گران است، شبیهش چیست؟»</li>
       <li><code>compare_products</code> — مقایسهٔ ۲ تا ۵ محصول کنار هم</li>
       <li><code>find_best_value</code> — «بهترین زیر بودجهٔ X»</li>
+      <li><code>browse_categories</code> — گشتن در دسته‌بندی‌های ترب</li>
+      <li><code>list_locations</code> — استان و شهر برای ارسال</li>
+      <li><code>special_offers</code> — پیشنهادهای ویژهٔ همین حالای ترب</li>
     </ul>
   </div>
 
@@ -119,7 +123,7 @@ export const LANDING = `<!DOCTYPE html>
   </div>
 
   <footer>
-    داده‌ها از API عمومی وب ترب می‌آید. <a href="https://github.com/mmdju/torob-mcp">مستندات کامل</a> در ریپوی عمومی.
+    داده‌ها از API عمومی وب ترب می‌آید. <a href="https://github.com/mmdju/torob-mcp">مستندات کامل</a> در مخزن همین پروژه است.
   </footer>
 </div>
 </body>

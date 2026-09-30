@@ -7,8 +7,20 @@
 // upstream, and titles that look identical to a human compare as different
 // strings to code.
 
+import { ZWNJ, faFold, faSearchVariants } from "fa-text-utils";
+
 // Re-exported so the rest of the server can keep importing them from here.
-export { ZWNJ, faFold, faSearchVariants } from "fa-text-utils";
+export { ZWNJ, faFold, faSearchVariants };
+
+// One canonical form for a query or a product name: yeh/kaf variants,
+// Arabic-Indic digits and whitespace collapse, so two spellings share one cache
+// entry and compare equal as strings. It is deliberately NOT used to rewrite
+// the query sent upstream - Torob matches those variants itself (measured: the
+// Arabic yeh and Persian digits return the same 1200 results). This is for the
+// server's own keys, its per-colo memory and its identity checks.
+export function foldKey(v: unknown): string {
+  return faFold(str(v)).toLowerCase();
+}
 
 export function str(v: unknown, fallback = ""): string {
   // Ids and codes arrive as numbers from some endpoints and as strings from

@@ -2,16 +2,32 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
-## unreleased
+## 0.3.0 - 2026-10-01
+
+The filters, the seller list and the sorts, all brought in line with what Torob actually accepts - plus an id resolution path that survives a fresh Worker isolate and a cache that can no longer grow without bound.
 
 ### Added
 
-- Every product card now carries the `details_url` it came from, and `product_details` / `similar_products` accept it back as `details_url`. A caller that keeps both opens the product with no server-side memory involved: the id resolves on a Worker isolate that never saw the search, and no name search is spent on it.
-- Writes to the per-colo cache go through the request's `waitUntil`, so a product name and details URL learned from a search are not cut off when the Worker response finishes.
+- **`available_filters` now carries the values.** Each group ships the choices it accepts (`options`, each `{name, value}`), a `values_url` for the brand list, and `options_truncated` when the list is a preview. A `filters` value is checked against the search that really ran: a value the search does not offer is refused **with the ones it does**, because Torob ignores an unknown value and answers unfiltered.
+- **Filter groups are remembered per query**, so a second call with the same words is validated before any upstream request; the fresh response stays the authority for everything else. A display name from the list (e.g. «۱ ترابایت») is mapped onto the value Torob takes (`1 tb`) when the group is known.
+- **`sort` now uses Torob's own vocabulary.** `newest` sent a parameter Torob did not read; the real orderings are `popularity`, `price` (cheapest first), `expensive` (dearest first), `newest` (newest first) and `sellers` (most sellers).
+- **The offer list carries what the shop stated**: `postage_text` / `postage_fee_toman`, `delivered_price_toman`, `guarantee`, `installment_providers`, `is_adv`, `last_price_change_date`, `has_public_torob_profile`, `shop_score_percentile`. `product_details` reports `cheapest_delivered_offer` and, when it differs, `cheapest_vs_delivered`.
+- **`best_rated_offer` is now the highest score**, not the first scored offer in the cheapest-first list (measured: the old pick could put a 3.0 shop above a 5.0 one). Ties break on votes, then price.
+- **`resolved_by` says how a product id was found**: `remembered`, `details-url`, `exact-id`, `name-search` or `id-only`, so a name match is never presented as the same id.
+- **`compare_products` accepts `{prk, details_url}`** for each product, and the whole comparison shares one lookup budget, so a cold 5-way compare cannot turn into a dozen paced upstream calls. Anything it cannot open comes back as an error in its own row.
+- **`find_best_value` gained `include_delivery`**: it reads the stated postage for the cheapest picks (up to 3) and reports the delivered price.
+- Every search and `find_best_value` call reports `total_matches_note`: Torob's count moves between identical requests (measured: 1125 then 1200 seconds apart), so page with `has_next_page` instead of quoting it.
+- `GET /mcp` answers with the landing page instead of a bare 404, and the page lists all nine tools.
 
 ### Fixed
 
+- **The filter surface is no longer a hard-coded list.** The old snapshot could not keep up with Torob (30 groups on a typical query) and refused filters Torob genuinely applies (`storage=1 tb` narrows ~1200 results to 17).
+- **A brand name is mapped onto Torob's brand slug** when the search showed the brand group. A display name like `apple` is not a slug and Torob ignores it; measured: `brand=apple` changed nothing while `brand=apple-اپل` narrowed the list.
+- **The response cache has a byte budget** (12MB, 1000 entries) and evicts oldest-first; a single payload larger than the whole budget is not cached at all. One product's raw details payload measures ~1.4MB, and a count-only cap could hold gigabytes on a Worker isolate that gets 128MB.
+- Every product card now carries the `details_url` it came from, and `product_details` / `similar_products` accept it back as `details_url`. A caller that keeps both opens the product with no server-side memory involved: the id resolves on a Worker isolate that never saw the search, and no name search is spent on it.
+- Writes to the per-colo cache go through the request's `waitUntil`, so a product name and details URL learned from a search are not cut off when the Worker response finishes.
 - The id-only details call no longer reports an empty response as a product. It falls through to the honest "search for it first" error, which names the way to recover.
+- `torob_suggest` drops the autocomplete entries that carry a `business_profile_query` instead of a search term, and says in `note` that it did, so a shop link is never returned as a suggested query.
 
 ## 0.2.0 - 2026-09-24
 

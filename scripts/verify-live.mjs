@@ -111,12 +111,37 @@ try {
   // The filter groups this search accepts, and that a real slug round-trips.
   const groups = search.available_filters?.length ?? 0;
   groups ? ok("search filters", `${groups} groups: ${search.available_filters.slice(0, 4).map((f) => f.slug).join(", ")}`) : bad("search filters", "none reported");
+  // The groups carry the values they take, and Torob's count travels with its
+  // own caveat instead of being quoted as a fact.
+  const withOptions = (search.available_filters ?? []).find((f) => Array.isArray(f.options) && f.options.length);
+  withOptions
+    ? ok("filter values", `${withOptions.slug}: ${withOptions.options.length} option(s)`)
+    : bad("filter values", "no group carries its values");
+  search.total_matches_note ? ok("count is labelled approximate") : bad("count note", "total_matches_note missing");
   await pause();
+
+  // A value the search itself advertised must round-trip through `filters`.
+  if (withOptions) {
+    const slug = withOptions.slug;
+    const value = withOptions.options[0].value;
+    const filtered = await call("search_products", { query: "گوشی ایفون ۱۳", filters: { [slug]: value }, limit: 3, sort: "expensive" }, id++);
+    filtered.filters_applied?.[slug] === value
+      ? ok("filter round-trip", `${slug}=${value}`)
+      : bad("filter round-trip", `${slug}=${value} came back as ${JSON.stringify(filtered.filters_applied)}`);
+    filtered.sort_meaning ? ok("sort meaning", filtered.sort_meaning) : bad("sort meaning", "sort_meaning missing");
+    await pause();
+  }
 
   if (search.products?.length) {
     const first = search.products[0];
-    const details = await call("product_details", { prk: first.prk, max_offers: 5 }, id++);
+    const detailsArgs = { prk: first.prk, max_offers: 5 };
+    if (first.details_url) detailsArgs.details_url = first.details_url;
+    const details = await call("product_details", detailsArgs, id++);
     details.offer_count !== undefined ? ok("product_details", `${details.offer_count} offers`) : bad("product_details");
+    details.resolved_by ? ok("resolved_by", details.resolved_by) : bad("resolved_by", "missing");
+    details.offers?.[0] && "postage_fee_toman" in details.offers[0]
+      ? ok("offer carries its postage")
+      : bad("offer postage", "postage_fee_toman missing");
     await pause();
 
     const similar = await call("similar_products", { prk: first.prk, limit: 3 }, id++);

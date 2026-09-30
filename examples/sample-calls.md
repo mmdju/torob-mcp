@@ -82,9 +82,11 @@ search_products { "query": "ماشین اصلاح مو", "shop_type": "online" }
 → products: [ … ]   # only online sellers
 ```
 
-If you pass a slug that does not exist, the call is **refused with the real
-ones** rather than quietly answering unfiltered - Torob itself ignores a slug
-it does not know, so a typo there would otherwise look like a filtered result.
+If you pass a slug or a value that does not exist, the call is **refused with
+the real ones** rather than quietly answering unfiltered - `available_filters`
+carries each group's accepted `options`, and Torob itself ignores a slug or
+value it does not know, so a typo there would otherwise look like a filtered
+result.
 
 ## "چی الان تخفیف خورده؟"
 

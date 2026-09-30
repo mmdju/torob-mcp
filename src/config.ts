@@ -33,35 +33,34 @@ export const RETRY_DELAY_MS = 2000;
 // hold a tool call open until the platform's own timeout.
 export const FETCH_TIMEOUT_MS = 15_000;
 
-// Torob's own ranking already reflects what the search was for; these are the
-// sort keys it accepts upstream.
-export const SORTS = ["popularity", "price", "newest"] as const;
+// Torob's own ranking already reflects what the search was for. The tool-facing
+// names are stable; SORT_PARAMS is what upstream actually accepts, read off the
+// live `sort` filter group ("", price, -price, -date, -supply).
+export const SORTS = ["popularity", "price", "expensive", "newest", "sellers"] as const;
 export type Sort = (typeof SORTS)[number];
+
+export const SORT_PARAMS: Record<Sort, string> = {
+  popularity: "",
+  price: "price",
+  expensive: "-price",
+  newest: "-date",
+  sellers: "-supply",
+};
 
 // shop_type narrows results to sellers shipping online vs having a physical
 // branch. Anything else upstream is ignored silently, so it is not offered.
 export const SHOP_TYPES = ["offline", "online"] as const;
 export type ShopType = (typeof SHOP_TYPES)[number];
 
-// Torob accepts an arbitrary query string on the search endpoint; the filter
-// slugs below were read off a live response (filters1 had 13 groups, filters2
-// had 5 toggles, attributes had 12 groups including brand). Rather than
-// hard-code a list that upstream can change under us, filters are passed as
-// (slug, value) pairs and any slug the response did not offer is refused with
-// the real ones - the same rule this workspace uses for unknown categories and
-// cities. A silently-ignored filter would look like a filtered result.
-export const KNOWN_FILTER_SLUGS = [
-  "price__gt",
-  "price__lt",
-  "available",
-  "offline",
-  "torobpay",
-  "has_warranty",
-  "has_discount",
-  "seller_type",
-  "brand",
-  "category",
-] as const;
+// Torob accepts an arbitrary query string on the search endpoint and advertises
+// a different filter surface per query (measured: 30 groups on "phone" -
+// price, brand, storage, ram, screen_size, battery, network, sim_card,
+// rom_country, register_status, active_status, stock_status, shop_type,
+// available, torobpay, sort, category, q - and the same response binds each
+// group to its values). A hard-coded list cannot keep up with that: it refused
+// filters Torob genuinely applies (storage=1 tb narrows ~1200 results to 17).
+// Filters are therefore validated against the search's own response - see
+// project.ts (filter groups + memory) and tools.ts (validation).
 
 // The gap between upstream calls. Torob's edge challenges a client that
 // arrives too fast - measured: a worker answering normally, then answering 490
@@ -109,5 +108,7 @@ export const MIN_SHOP_VOTES = 0;
 export const SORT_LABELS: Record<Sort, string> = {
   popularity: "most relevant",
   price: "cheapest first",
+  expensive: "dearest first",
   newest: "newest first",
+  sellers: "most sellers",
 };

@@ -86,6 +86,9 @@ test("search_products returns compact cards and the honest total", async () => {
   assert.equal(out.products[1].price_toman, null);
   assert.equal(out.has_next_page, true);
   assert.equal(out.suggested_categories[0].id, "230");
+  // Torob's count moves between identical requests, so it travels with its
+  // own caveat instead of being quoted as a fact.
+  assert.match(out.total_matches_note, /approximate/i);
 });
 
 test("search_products reports a price range and the sort meaning", async () => {
@@ -182,9 +185,108 @@ test("product_details opens a product from just the details_url it handed out", 
   });
   assert.equal(out.prk, id);
   assert.equal(out.offer_count, 2);
+  assert.equal(out.resolved_by, "details-url");
   // One call, straight to the details endpoint: no name search behind it.
   assert.equal(seen.length, 1);
   assert.match(seen[0], /\/details\//);
+});
+
+test("product_details falls back to the id-only lookup and says how it resolved", async () => {
+  // A product this server has never seen, with no details_url: the only way in
+  // is the id-only details call. resolved_by records which path worked, so a
+  // caller always knows how the product was found.
+  const id = "9f8e7d6c-5b4a-4938-8271-6a5b4c3d2e1f";
+  stub((url) => {
+    if (url.includes("/details/")) return { ...detailsPayload, random_key: id };
+    return { results: [], count: 0, next: "" };
+  });
+  const out = await run("product_details", { prk: id });
+  assert.equal(out.prk, id);
+  assert.equal(out.resolved_by, "id-only");
+});
+
+test("product_details reports the best rated seller and the delivered price", async () => {
+  // Best rated is the highest score - ties break on votes - and the delivered
+  // price adds the postage Torob states, so the cheapest item price is not
+  // always the cheapest at the door.
+  const id = "1b2c3d4e-5f60-4718-9a2b-3c4d5e6f7081";
+  const payload = {
+    random_key: id,
+    name1: "هدفون بی‌سیم",
+    price: 90000,
+    products_info: {
+      result: [
+        { shop_name: "ارزان", shop_score: 3, shop_votes_count: 10, price: 90000, availability: true, postage_fee: "هزینه ارسال ۲۰٫۰۰۰ تومان" },
+        { shop_name: "فروشگاه مرکزی", shop_score: 5, shop_votes_count: 50, price: 95000, availability: true, postage_fee: "هزینه ارسال رایگان" },
+        {
+          shop_name: "بازار",
+          shop_score: 5,
+          shop_votes_count: 3,
+          price: 92000,
+          availability: true,
+          guarantee_info: { status: "enabled" },
+          installment: { providers: [{ name: "بلوبانک" }, { short_title: "تارا" }] },
+          is_adv: true,
+        },
+        { shop_name: "بی‌امتیاز", price: 99000, availability: true },
+      ],
+    },
+  };
+  stub((url) => (url.includes("/details/") ? payload : searchPayload));
+  const out = await run("product_details", {
+    prk: id,
+    details_url: `https://api.torob.com/v4/base-product/details/?search_id=s5&prk=${id}`,
+  });
+  // Cheapest item price, and the cheapest once postage is added: two answers.
+  assert.equal(out.cheapest_offer.shop_name, "ارزان");
+  assert.equal(out.cheapest_delivered_offer.shop_name, "بازار");
+  assert.equal(out.cheapest_delivered_offer.delivered_price_toman, 92000);
+  assert.match(out.cheapest_vs_delivered, /بازار/);
+  // Two shops with a perfect score: the one with more votes wins.
+  assert.equal(out.best_rated_offer.shop_name, "فروشگاه مرکزی");
+  assert.match(out.cheapest_vs_best_rated, /فروشگاه مرکزی/);
+  const bazaar = out.offers.find((o) => o.shop_name === "بازار");
+  assert.equal(bazaar.guarantee, "enabled");
+  assert.deepEqual(bazaar.installment_providers, ["بلوبانک", "تارا"]);
+  assert.equal(bazaar.is_adv, true);
+  // The no-score shop is never presented as best rated.
+  assert.notEqual(out.best_rated_offer.shop_name, "بی‌امتیاز");
+});
+
+test("a cold compare reports each miss in its own row without runaway lookups", async () => {
+  // Five ids the server has never seen, each with no details_url: every row
+  // must come back with its own error, and the whole comparison must stay
+  // within the shared lookup budget instead of hammering Torob.
+  const ids = [
+    "11111111-1111-4111-8111-111111111111",
+    "22222222-2222-4222-8222-222222222222",
+    "33333333-3333-4333-8333-333333333333",
+    "44444444-4444-4444-8444-444444444444",
+    "55555555-5555-4555-8555-555555555555",
+  ];
+  const seen = [];
+  stub((url) => {
+    seen.push(url);
+    if (url.includes("/details/")) return { random_key: "someone-else", name1: "چیز دیگر", products_info: { result: [] } };
+    return { results: [], count: 0, next: "" };
+  });
+  const out = await run("compare_products", { prks: ids });
+  assert.equal(out.requested, 5);
+  assert.equal(out.compared, 0);
+  assert.equal(out.partial_failure, true);
+  assert.equal(out.products.length, 5);
+  assert.ok(out.products.every((p) => p.error));
+  // One details attempt per id - the budget is spent, not blown.
+  assert.equal(seen.filter((u) => u.includes("/details/")).length, 5);
+});
+
+test("find_best_value can read postage for the cheapest picks", async () => {
+  stub((url) => (url.includes("/details/") ? detailsPayload : searchPayload));
+  const out = await run("find_best_value", { query: "ایفون", budget_toman: 60000000, include_delivery: true });
+  assert.equal(out.delivered.length, 1);
+  assert.equal(out.delivered[0].prk, "prk-aaa");
+  assert.equal(out.delivered[0].cheapest_delivered_offer.price_toman, 50000000);
+  assert.match(out.delivery_note, /postage/i);
 });
 
 test("similar_products accepts the details_url as proof the id is real", async () => {

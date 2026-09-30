@@ -66,6 +66,23 @@ const searchPayload = {
   ],
 };
 
+// The same search with a choice group: the fixture's `storage` group offers
+// "1 tb" and "2 tb" under Persian names.
+const storagePayload = {
+  ...searchPayload,
+  attributes: [
+    {
+      title: "حافظه",
+      slug: "storage",
+      type: "multiple_choice",
+      items: [
+        { name: "۱ ترابایت", value: "1 tb" },
+        { name: "۲ ترابایت", value: "2 tb" },
+      ],
+    },
+  ],
+};
+
 // ------------------------------------------------------------------ filters
 
 test("search_products reports the filter groups the search really accepts", async () => {
@@ -73,10 +90,17 @@ test("search_products reports the filter groups the search really accepts", asyn
   const out = await run("search_products", { query: "ایفون" });
   const slugs = out.available_filters.map((f) => f.slug);
   assert.deepEqual(slugs, ["price", "available", "torobpay", "brand"]);
+  assert.match(out.total_matches_note, /approximate/i);
   const brand = out.available_filters.find((f) => f.slug === "brand");
   assert.equal(brand.values, 2);
   assert.match(brand.values_url, /brand\/list/);
-  assert.equal(brand.sample[0].label, "سامسونگ");
+  assert.equal(brand.options[0].name, "سامسونگ");
+  assert.equal(brand.options[0].value, "samsung");
+  // A brand list is a preview - the value is passed through unchecked.
+  assert.equal(brand.options_truncated, true);
+  // A price group is a range, not choices: it has no options to pass back.
+  const price = out.available_filters.find((f) => f.slug === "price");
+  assert.equal(price.options, undefined);
 });
 
 test("min_price_toman and max_price_toman become Torob's own slugs", async () => {
@@ -118,6 +142,42 @@ test("a known filter slug is passed through", async () => {
   const out = await run("search_products", { query: "ایفون", filters: { available: "1" } });
   assert.match(seen, /available=1/);
   assert.equal(out.filters_applied.available, "1");
+});
+
+test("a filter value the group does not offer is refused with the real ones", async () => {
+  // Torob ignores a value it does not know, so a typo would come back as an
+  // unfiltered list that looks filtered. The refusal names the values that do
+  // work. The fixture's `storage` group offers "1 tb" and "2 tb".
+  stub(() => storagePayload);
+  await assert.rejects(
+    () => run("search_products", { query: "تبلت", filters: { storage: "4 tb" } }),
+    /not a value 'storage' accepts/
+  );
+});
+
+test("a remembered filter set turns 'true' into Torob's own '1'", async () => {
+  // First call teaches the server this query's filter surface; the second can
+  // canonicalize before spending an upstream request instead of refusing a
+  // value that is not literally "1".
+  stub(() => searchPayload);
+  await run("search_products", { query: "هدفون سونی" });
+  const out = await run("search_products", { query: "هدفون سونی", filters: { available: "true" } });
+  assert.equal(out.filters_applied.available, "1");
+});
+
+test("a remembered filter set maps a display name onto its value", async () => {
+  // The Persian name a shopper reads is not the value Torob takes: the
+  // remembered group maps one onto the other, so the honest name works.
+  stub(() => storagePayload);
+  await run("search_products", { query: "تبلت سامسونگ" });
+  let seen = "";
+  stub((url) => {
+    seen = url;
+    return storagePayload;
+  });
+  const out = await run("search_products", { query: "تبلت سامسونگ", filters: { storage: "۱ ترابایت" } });
+  assert.equal(out.filters_applied.storage, "1 tb");
+  assert.match(seen, /storage=1(%20|\+)tb/);
 });
 
 // ------------------------------------------------------------------ similar
