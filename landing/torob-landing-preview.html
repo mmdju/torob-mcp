@@ -242,7 +242,7 @@
   <h1><span style="--i:0">T</span><span style="--i:1">o</span><span style="--i:2">r</span><span style="--i:3">o</span><span style="--i:4">b</span><span style="--i:5">&nbsp;</span><span style="--i:6">M</span><span style="--i:7">C</span><span style="--i:8">P</span></h1>
   <p class="sub">پل بین ترب و دستیار هوشمند شما.</p>
   <div class="btns">
-    <span class="go-wrap"><a class="go" href="/mcp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7a5 5 0 0 0 0 10h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4a3.1 3.1 0 0 1 0 6.2h-4V17h4a5 5 0 0 0 0-10z"/></svg><span id="ghT">راهنمای اتصال</span></a></span>
+    <span class="go-wrap"><a class="go" href="/mcp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7a5 5 0 0 0 0 10h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4a3.1 3.1 0 0 1 0 6.2h-4V17h4a5 5 0 0 0 0-10z"/></svg><span id="ghT">راهنما</span></a></span>
     <a class="mid" href="https://x.com/MmdjDev"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.9 1.15h3.68l-8.04 9.19L24 22.85h-7.41l-5.8-7.58-6.64 7.58H.47l8.6-9.83L0 1.15h7.59l5.24 6.93 6.07-6.93Zm-1.29 19.5h2.04L6.49 3.24H4.3l13.31 17.41Z"/></svg><span style="font-family:'Outfit','Doran',system-ui,sans-serif;font-weight:600;letter-spacing:.01em">MmdjDev</span></a>
     <a class="tg" href="https://t.me/Mmdju"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.9 4.4 2.8 11.8c-.7.3-.7 1.2.1 1.4l4.6 1.4 1.7 5.3c.2.7 1.2.9 1.8.3l2.5-2.4 4.8 3.5c.6.4 1.5.1 1.7-.7l2.4-14.5c.2-1-.8-1.9-1.5-1.7zM8.3 13l10.4-6.6c.2-.1.4.2.2.3l-8.7 7.8-.3 2.6-1.6-4.1z"/></svg><span style="font-family:'Outfit','Doran',system-ui,sans-serif;font-weight:600;letter-spacing:.01em" id="tgT">Mmdju</span></a>
     <a class="health" href="https://torob-mcp.mmdju3.workers.dev/health"><svg class="dot-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></svg><span id="healthT">سلامت سرویس</span><span class="dot wait" id="dot"></span></a>
@@ -429,7 +429,9 @@
     document.getElementById("dot").classList.remove("wait");
     document.getElementById("dot").classList.add("on");
     var enQ = document.documentElement.lang === "en";
-    var noVer = matchMedia("(pointer: coarse)").matches;
+    // A narrow window wraps the version onto a second line and turns the pill
+    // into a blob, so it travels only where there is room for it.
+    var noVer = matchMedia("(pointer: coarse)").matches || innerWidth <= 520;
     document.getElementById("healthT").textContent = (enQ ? "Service is live" : "سرویس زنده است") + (!noVer && j.version ? (enQ ? " · v" : " · نسخه ") + j.version : "");
     var stVers = document.getElementById("stVersion"); if (stVers) stVers.textContent = j.version || "—";
     var stStat = document.getElementById("stStat"); if (stStat) stStat.textContent = enQ ? "Live" : "زنده";
@@ -512,8 +514,8 @@
     "Just ask: «a phone under 20 million?»",
     "Read-only — no key, no login."
   ];
-  var HEALTH_OK_EN = "Service is live", STATS_EN = "9 tools · prices in Toman", NOTE_EN = "Independent project — not affiliated with Torob", SHARE_EN = "Share", SHARED_EN = "Link copied", GH_EN = "Connect guide", VER_EN = " · v", QR_EN = "QR", QRH_EN = "Scan with your phone", QRCOPY_EN = "Copy link", QRCLOSE_EN = "Close";
-  var HEALTH_OK_FA = "سرویس زنده است", STATS_FA = "۹ ابزار · قیمت به تومان", NOTE_FA = "پروژه‌ای مستقل — وابسته به ترب نیست", SHARE_FA = "اشتراک", SHARED_FA = "پیوند کپی شد", GH_FA = "راهنمای اتصال", VER_FA = " · نسخه ", QR_FA = "کیوآر", QRH_FA = "اسکن با گوشی", QRCOPY_FA = "کپی پیوند", QRCLOSE_FA = "بستن";
+  var HEALTH_OK_EN = "Service is live", STATS_EN = "9 tools · prices in Toman", NOTE_EN = "Independent project — not affiliated with Torob", SHARE_EN = "Share", SHARED_EN = "Link copied", GH_EN = "Guide", VER_EN = " · v", QR_EN = "QR", QRH_EN = "Scan with your phone", QRCOPY_EN = "Copy link", QRCLOSE_EN = "Close";
+  var HEALTH_OK_FA = "سرویس زنده است", STATS_FA = "۹ ابزار · قیمت به تومان", NOTE_FA = "پروژه‌ای مستقل — وابسته به ترب نیست", SHARE_FA = "اشتراک", SHARED_FA = "پیوند کپی شد", GH_FA = "راهنما", VER_FA = " · نسخه ", QR_FA = "کیوآر", QRH_FA = "اسکن با گوشی", QRCOPY_FA = "کپی پیوند", QRCLOSE_FA = "بستن";
   var STATH_EN = "Service stats", STATH_FA = "آمار سرویس", STTL_EN = "Tools", STTL_FA = "ابزار", STVR_EN = "Version", STVR_FA = "نسخه", STST_EN = "Status", STST_FA = "وضعیت", STGR_EN = "Filter groups", STGR_FA = "گروه فیلتر", STLV_EN = "Live", STLV_FA = "زنده";
   var isEn = false;
   document.getElementById("langB").addEventListener("click", function () {
@@ -545,7 +547,7 @@
     else document.querySelector(".sub").textContent = window.__lines[0];
     var dot = document.getElementById("dot");
     if (dot.classList.contains("on")) {
-      var v = matchMedia("(pointer: coarse)").matches ? "" : document.getElementById("healthT").textContent.replace(/.*[vVنسخه]\s?/, "");
+      var v = matchMedia("(pointer: coarse)").matches || innerWidth <= 520 ? "" : document.getElementById("healthT").textContent.replace(/.*[vVنسخه]\s?/, "");
       document.getElementById("healthT").textContent = (isEn ? HEALTH_OK_EN : HEALTH_OK_FA) + (v ? (isEn ? VER_EN : VER_FA) + v : "");
     } else if (dot.classList.contains("bad")) {
       document.getElementById("healthT").textContent = isEn ? "Service unavailable" : "سرویس در دسترس نیست";
