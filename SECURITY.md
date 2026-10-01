@@ -21,9 +21,13 @@ This server treats a challenge as a cooldown, not a failure to retry:
 
 ## Rate Limiting
 
-There is **no per-IP rate limit on `/mcp`**. The endpoint is keyless and read-only, and the pacing this server applies is to **Torob**, not to callers: a normal agent session asking one question every few seconds is never throttled here.
+The hosted copy at `torob-mcp.mmdju3.workers.dev` answers at most **20 `POST /mcp` calls a minute per client IP**. Over the limit it returns **HTTP 429** with a JSON-RPC error body, a `retry-after` header and `x-ratelimit-limit` / `x-ratelimit-remaining`, so a client can see where it stands instead of guessing.
 
-What bounds the load is the upstream gap and the circuit breaker above. A burst of parallel tool calls will not produce a burst of upstream requests - it will produce one request, a reported challenge, and then fast local refusals for the rest of that window.
+Twenty a minute is far above a real conversation: a whole sweep of the tools, one call at a time with a pause between, is about four. It is low enough that a script cannot use this service as an unmetered price API. The count is kept in the per-colo cache, which makes it a **deterrent rather than a meter** - a burst spread across colos is counted once per colo - and only `/mcp` is limited: the landing page, the connect page, the fonts and `/health` keep answering, so a browser is never locked out of the page that explains the limit.
+
+**A self-hosted run has no limit.** The limiter lives in `src/rate-limit.ts` and is imported by `src/worker.ts` alone; the server core and the Node entry point do not know it exists.
+
+What bounds the upstream load is the gap and the circuit breaker above. A burst of parallel tool calls will not produce a burst of upstream requests - it will produce one request, a reported challenge, and then fast local refusals for the rest of that window.
 
 ## CORS
 

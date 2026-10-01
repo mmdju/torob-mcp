@@ -6,6 +6,19 @@ compatibility_date = "2026-09-01"
 # Keyless and stateless: no bindings and no secrets. Torob needs no login
 # token and this server never signs in.
 #
+# The rate limiter counts each client's calls in a Durable Object so the number
+# is exact and the same in every colo; without this binding the Worker falls back
+# to a per-colo cache, which is weaker but never fatal.
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
+
+# Never reuse this tag for a different class: a tag is what tells Cloudflare that
+# an existing object belongs to the class of the same name.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimiter"]
+
 # One thing worth knowing: Torob's edge answers data-centre clients with an
 # arCAPTCHA page (HTTP 490) instead of JSON. Requests are expected to be
 # answered from a Cloudflare Worker's own egress, which is not challenged -

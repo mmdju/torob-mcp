@@ -115,7 +115,7 @@ Torob's public web API (**undocumented, may change without notice**). This proje
 
 ## Status
 
-**Free public service** on Cloudflare Workers, read-only and keyless. There is no per-IP rate limit on `/mcp` - the pacing this server applies is to **Torob**, not to you, because Torob challenges a caller that goes too fast. See [SECURITY.md](SECURITY.md).
+**Free public service** on Cloudflare Workers, read-only and keyless. This hosted copy answers **at most 20 `/mcp` calls a minute per client IP** - a whole sweep of the tools takes about four, so a normal conversation never notices, while a script cannot use the service as an unmetered price API. Over the limit you get HTTP 429 with a `retry-after` header; **running the server yourself has no limit at all**. Separately, the pacing this server applies is to **Torob**, not to you, because Torob challenges a caller that goes too fast. See [SECURITY.md](SECURITY.md).
 
 ## License
 
