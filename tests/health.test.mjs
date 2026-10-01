@@ -22,6 +22,21 @@ test("GET / serves the landing page", async () => {
   assert.match(html, /torob-mcp/);
 });
 
+test("GET /doran-400.woff2 serves the landing page's own font", async () => {
+  const res = await worker.fetch(new Request("https://torob-mcp.test/doran-400.woff2"));
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "font/woff2");
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  // A woff2 file starts with the signature "wOF2".
+  assert.deepEqual([...bytes.slice(0, 4)], [0x77, 0x4f, 0x46, 0x32]);
+  assert.ok(bytes.length > 10000, `font is only ${bytes.length} bytes`);
+});
+
+test("an unknown font weight is not served", async () => {
+  const res = await worker.fetch(new Request("https://torob-mcp.test/doran-999.woff2"));
+  assert.equal(res.status, 404);
+});
+
 test("GET /og.png serves a whole PNG, not a truncated one", async () => {
   const res = await worker.fetch(new Request("https://torob-mcp.test/og.png"));
   assert.equal(res.status, 200);
@@ -49,6 +64,16 @@ test("OPTIONS answers the CORS preflight", async () => {
   const res = await worker.fetch(new Request("https://torob-mcp.test/mcp", { method: "OPTIONS" }));
   assert.equal(res.status, 204);
   assert.equal(res.headers.get("access-control-allow-origin"), "*");
+});
+
+test("GET /mcp serves the human connect page, not a JSON error", async () => {
+  const res = await worker.fetch(new Request("https://torob-mcp.test/mcp"));
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") ?? "", /text\/html/);
+  const html = await res.text();
+  // The address to paste, with the scheme, is what a visitor came here for.
+  assert.match(html, /https:\/\/torob-mcp\.mmdju3\.workers\.dev\/mcp/);
+  assert.match(html, /کپی/);
 });
 
 test("the landing page is Persian and RTL", async () => {

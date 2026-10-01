@@ -7,6 +7,7 @@
 // upstream and http.ts turns it into an actionable error rather than an empty
 // result.
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { FONT_BIN } from "./fonts.js";
 import { LANDING, MCP_PAGE } from "./landing.js";
 import { OG_IMAGE } from "./og-image.js";
 import { buildServer, VERSION } from "./server.js";
@@ -83,8 +84,20 @@ export default {
         })
       );
     }
+    // The landing page's own text face, so the site looks the same on a device
+    // that has no Persian font installed.
+    const font = url.pathname.match(/^\/doran-(\d{3})\.woff2$/);
+    if (req.method === "GET" && font && FONT_BIN[Number(font[1])]) {
+      return withCors(
+        new Response(FONT_BIN[Number(font[1])].buffer as unknown as ArrayBuffer, {
+          headers: { "content-type": "font/woff2", "cache-control": "public, max-age=31536000, immutable" },
+        })
+      );
+    }
     if (req.method === "GET" && (url.pathname === "/" || url.pathname === "")) {
-      return new Response(LANDING, { headers: { "content-type": "text/html; charset=utf-8" } });
+      return new Response(LANDING, {
+        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300" },
+      });
     }
     return withCors(new Response("Not found. POST /mcp for MCP.", { status: 404 }));
   },

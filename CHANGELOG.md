@@ -2,6 +2,13 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
+## unreleased
+
+### Added
+
+- **The worker now serves a real site.** `GET /` is a Persian, RTL landing page (dark theme, QR hand-off, live status and version) and `GET /mcp` is the page a browser gets instead of a JSON error: the address to paste, the three steps, and a copy button. Both are generated from `landing/*.html` by `scripts/gen-landing.mjs`, so the page has one owner and the two transports cannot drift apart.
+- The Doran text face ships inside the worker as `/doran-<weight>.woff2`, so the page looks the same on a machine with no Persian font installed.
+
 ## 0.3.0 - 2026-10-01
 
 The filters, the seller list and the sorts, all brought in line with what Torob actually accepts - plus an id resolution path that survives a fresh Worker isolate and a cache that can no longer grow without bound.
