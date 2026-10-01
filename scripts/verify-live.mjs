@@ -159,7 +159,9 @@ try {
     }
   }
 
-  const best = await call("find_best_value", { query: "قاب گوشی", budget_toman: 500000, limit: 3 }, id++);
+  // Budgets here are the real market: a phone case runs from ~20,000 Toman to
+  // tens of millions, so 1.5M is a normal ask and returns matches.
+  const best = await call("find_best_value", { query: "قاب گوشی", budget_toman: 1500000, limit: 3 }, id++);
   best.picks !== undefined ? ok("find_best_value", `${best.matches_in_budget} in budget`) : bad("find_best_value");
   await pause();
 

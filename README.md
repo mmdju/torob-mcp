@@ -20,7 +20,7 @@ Any MCP client, **one URL**. Cline / Cursor / Claude Desktop (`mcp.json` style):
 }
 ```
 
-Then just talk: **"ارزون‌ترین آیفون ۱۳ کجاست؟"**, **"هدفون زیر ۵۰۰ هزار"**, **"این گوشی رو کجا بخرم بهتره؟"**, **"چی تخفیف خورده؟"**.
+Then just talk: **"ارزون‌ترین آیفون ۱۳ کجاست؟"**, **"هدفون زیر ۱۰ میلیون"**, **"این گوشی رو کجا بخرم بهتره؟"**, **"چی تخفیف خورده؟"**.
 
 Agents running in a browser work too - the endpoint answers CORS preflights (`OPTIONS /mcp`).
 

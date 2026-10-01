@@ -57,13 +57,13 @@ compare_products { "prks": ["prk-1", "prk-2"] }
 `seller_count` matters as much as price: 64 sellers means the price is
 competitive, one seller means it is whatever that shop decided.
 
-## "زیر ۵۰۰ هزار یه هدفون خوب هست؟"
+## "زیر ۱۰ میلیون یه هدفون خوب هست؟"
 
 ```
-find_best_value { "query": "هدفون", "budget_toman": 500000, "limit": 3 }
-→ matches_in_budget: 7
-  out_of_stock_excluded: 4
-  best_value: { name_fa: "…", price_toman: 399000, shop_name: "…" }
+find_best_value { "query": "هدفون", "budget_toman": 10000000, "limit": 3 }
+→ matches_in_budget: 23
+  out_of_stock_excluded: 0
+  best_value: { name_fa: "هدفون بی‌سیم مدل P47", price_toman: 238970, shop_name: "…" }
 ```
 
 `out_of_stock_excluded` is reported so the agent does not have to count the

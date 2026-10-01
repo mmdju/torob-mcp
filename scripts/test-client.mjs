@@ -80,7 +80,7 @@ if (pair.length === 2) {
   if (compared) line(`  cheapest overall: ${compared.cheapest_overall?.name ?? "-"} (diff ${compared.price_difference_toman ?? "-"})`);
 }
 
-const budget = await step("find_best_value", () => run("find_best_value", { query: "کابل_aux", budget_toman: 5_000_000, limit: 3 }));
+const budget = await step("find_best_value", () => run("find_best_value", { query: "کابل_aux", budget_toman: 500_000, limit: 3 }));
 if (budget) line(`  ${budget.matches_in_budget} in budget, best: ${budget.best_value?.name_fa ?? "-"}`);
 
 line("\ndone.");

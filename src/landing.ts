@@ -392,7 +392,7 @@
   }, 1800);
   window.__lines = [
     "پل بین ترب و دستیار هوشمند شما.",
-    "فقط حرف بزن: «گوشی زیر ۲۰ میلیون؟»",
+    "فقط حرف بزن: «گوشی زیر ۲۰۰ میلیون؟»",
     "خواندنی و امن — بدون کلید و لاگین."
   ];
   window.__lineIdx = 0;
@@ -514,7 +514,7 @@
   var FA_LINES = window.__lines.slice();
   var EN_LINES = [
     "The bridge between Torob and your AI.",
-    "Just ask: «a phone under 20 million?»",
+    "Just ask: «a phone under 200 million?»",
     "Read-only — no key, no login."
   ];
   var HEALTH_OK_EN = "Service is live", STATS_EN = "9 tools · prices in Toman", NOTE_EN = "Independent project — not affiliated with Torob", SHARE_EN = "Share", SHARED_EN = "Link copied", GH_EN = "Guide", VER_EN = " · v", QR_EN = "QR", QRH_EN = "Scan with your phone", QRCOPY_EN = "Copy link", QRCLOSE_EN = "Close";
