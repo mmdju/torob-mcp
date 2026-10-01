@@ -98,6 +98,88 @@ special_offers { "limit": 5 }
 Featured deals are merchandising, not a product's seller list - keep the two
 apart, so "on deal" never gets mixed up with "cheap".
 
+## "الان بخرم یا صبر کنم؟"
+
+The chart is the part a price list cannot answer.
+
+```
+price_history { "prk": "ca10472a-…", "details_url": "…", "months": 12 }
+→ window: { from: "۲۵ شهریور ۱۴۰۴", to: "۲۶ مرداد ۱۴۰۵", points: 12 }
+  points_available: 54
+  series: [ { label: "کمترین قیمت", latest: { date: "۲۶ مرداد ۱۴۰۵", value: 689999 } },
+            { label: "میانگین قیمت", latest: { date: "۲۶ مرداد ۱۴۰۵", value: 1243456 } } ]
+  reading: "Over the newest 12 monthly point(s) … the lowest figure Torob charts
+            is 689٬999 Toman (۲۶ مرداد ۱۴۰۵) and the highest …"
+  last_modified: "2026-09-30T20:33:05+00:00"
+```
+
+The series labels are Torob's own (average and lowest), so quote them. Today's
+price comes from `product_details` - putting the two side by side is the honest
+"buy now or wait" answer.
+
+## "این فروشنده معتبره؟"
+
+Every offer carries a `shop_id`; that is the door into the shop's own profile.
+
+```
+product_details { "prk": "ca10472a-…", "max_offers": 3 }
+→ cheapest_offer: { shop_name: "زوبین کالا", shop_id: "365234", price_toman: 689999 }
+
+shop_profile { "shop_id": "365234" }
+→ trust_seal: { level: "نماد بدون ستاره", valid_until: "اعتبار تا تاریخ ۱۴۰۶/۰۶/۱۷" }
+  score: 4.9, active_time: "۵ ماه و ۳ هفته", status: "فعال"
+  score_notes: [ "امتیاز: ۴.۹ از ۵", "…", "۲ پیگیری سفارش خاتمه یافته با وضعیت تخلف فروشگاه" ]
+
+shop_profile { "shop_id": "365234", "include_products": true, "limit": 5 }
+→ catalogue_count: 412
+  catalogue_price_range_toman: { min: 47376, max: 18000000 }
+```
+
+`score_notes` is Torob's own text - including a violation note when there is
+one. Report it as sent instead of smoothing it over.
+
+## "حضوری هم می‌شه خرید؟"
+
+The in-person shops ride along in the details response, so this costs no extra
+call - but every shelf price carries its own age.
+
+```
+product_details { "prk": "ca10472a-…", "max_in_person": 3 }
+→ in_person_count: 36
+  in_person_sellers: [ { shop_name: "شهاب دیجیتال", city: "مشهد",
+                         price_text: "۸۹۰٫۰۰۰ تومان", is_open: false,
+                         hours_today: "تا ۰۹:۰۰ امروز",
+                         last_price_change_date: "۸ ماه و ۹ روز پیش" }, … ]
+  in_person_note: "These are shops selling this product in person. Each price is
+                   the shop's own and can be old - …"
+```
+
+Say the age out loud ("قیمتش مال ۸ ماه پیشه") rather than presenting a shelf
+price as today's.
+
+## "این عکس چیه؟"
+
+A picture link is enough - Torob fetches the image itself.
+
+```
+search_by_image { "image_url": "https://image.torob.com/base/images/8_/oJ/…jpg", "limit": 3 }
+→ products: [ { name_fa: "هدفون بی‌سیم جی‌بی‌ال JBL Tune 530BT", price_text: "۱۱٫۰۲۰٫۰۰۰ تومان" }, … ]
+  matched_product: { prk: "84069e65-…" }
+```
+
+`matched_product` is Torob recognising the exact item; the rest of the list is
+what it considers similar. An empty match is not proof the product is missing.
+
+## "مردم الان چی سرچ می‌کنن؟"
+
+```
+torob_trends { "limit": 5 }
+→ trends: [ { query: "قیمت طلا 18", sample: { name_fa: "انگشتر طلا ۱۸ عیار", price_toman: 48543000 } }, … ]
+```
+
+A wording to seed a search with when the user has none of their own. Each
+sample card keeps its `prk` and `details_url`, so it can be opened directly.
+
 ## Nothing found
 
 ```

@@ -52,6 +52,10 @@ export const SORT_PARAMS: Record<Sort, string> = {
 export const SHOP_TYPES = ["offline", "online"] as const;
 export type ShopType = (typeof SHOP_TYPES)[number];
 
+// The shop directories (find_shops, shop_profile's catalogue) page 0-based
+// upstream. The public tools stay 1-based like every other pager here.
+export const SHOP_PAGE_MAX = 20;
+
 // Torob accepts an arbitrary query string on the search endpoint and advertises
 // a different filter surface per query (measured: 30 groups on "phone" -
 // price, brand, storage, ram, screen_size, battery, network, sim_card,
@@ -77,6 +81,15 @@ export const TTL = {
   similar: 15 * MIN,
   locations: 24 * HOUR, // province/city lists are administrative facts
   offers: 10 * MIN,
+  // The chart is monthly, so an hourly refresh is already finer than the data.
+  chart: 6 * HOUR,
+  changes: 30 * MIN, // "۸ ساعت پیش" is the unit here, so half an hour is enough
+  freshness: 30 * MIN,
+  shop: 6 * HOUR, // a shop's profile changes slowly (seal, address, hours)
+  shopProducts: 15 * MIN, // a catalogue's prices move like the market's
+  shops: 30 * MIN,
+  trends: 30 * MIN,
+  image: 15 * MIN,
 };
 
 export const ATTRIBUTION =

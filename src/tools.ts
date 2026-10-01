@@ -1,29 +1,45 @@
-// torob-mcp tools. Nine read-only tools.
+// torob-mcp tools. Fourteen read-only tools.
 //
 // The split that matters: a search card shows the CHEAPEST offer only, because
 // that is the one number a shopper asks for. Every seller behind that number
 // lives behind product_details. An agent that answers "where is this cheapest"
 // from a search card would be naming a shop it never checked the reliability
 // of, so the two are deliberately separate calls.
+//
+// The price tools follow the same rule one level up: price_history reports what
+// a product has cost over years, product_details reports what it costs now and
+// where, and shop_profile answers whether the shop behind one of those offers
+// can be trusted at all.
 
-import { SHOP_TYPES, SORTS, SORT_LABELS, type ShopType, type Sort } from "./config.js";
+import { ATTRIBUTION, SHOP_PAGE_MAX, SHOP_TYPES, SORTS, SORT_LABELS, type ShopType, type Sort } from "./config.js";
 import { UpstreamError } from "./http.js";
-import { clampLimit, clampPage, foldKey, num, pageClampNote, str } from "./normalize.js";
+import { clampLimit, clampPage, foldKey, formatToman, num, pageClampNote, str } from "./normalize.js";
 import {
+  OPTION_PREVIEW,
   type FilterGroup,
   type LookupBudget,
+  type PriceChart,
   type ProductCard,
   categoryChildren,
   cities,
   filterKeyMap,
   filterMemoryKey,
+  findShops,
+  popularCities,
   productDetails,
+  productLastModified,
+  productPriceChanges,
+  productPriceChart,
   provinces,
   rememberedFilterGroups,
+  searchByImage,
   searchProducts,
+  shopProfile,
+  shopProducts,
   similarProducts,
   specialOffers,
   suggestTerms,
+  trendingSearches,
 } from "./project.js";
 
 // openWorldHint: false is declared (not left to the MCP default of true):
@@ -287,8 +303,19 @@ const searchTool: ToolDef = {
       page_count: found.page_count,
       has_next_page: found.has_next_page,
       price_range_toman: { min: found.min_price_toman, max: found.max_price_toman },
+      ...(found.price_bounds_toman ? { price_bounds_toman: found.price_bounds_toman } : {}),
       products: found.products.slice(0, limit),
       available_filters: found.available_filters,
+      // The brand group above is a preview; when the search offers more brands
+      // than it shows, the full list (with the slugs `brand` needs) travels here.
+      ...(found.brand_values.length > OPTION_PREVIEW || found.brand_values_truncated
+        ? {
+            brand_values: found.brand_values,
+            brand_values_note:
+              "The brand group in available_filters is a preview; these are the slugs `brand` accepts. " +
+              (found.brand_values_truncated ? "There are more than shown - the group's values_url lists the rest." : ""),
+          }
+        : {}),
       ...(found.products.length > limit
         ? { truncated: true, returned: limit, note: `${found.products.length} cards were on this page; showing ${limit}.` }
         : {}),
@@ -327,6 +354,11 @@ const detailsTool: ToolDef = {
           "The details_url from the same card. Pass it back with the prk and the product opens with no lookup: Torob's id alone is not an address.",
       },
       max_offers: { type: "number", description: "How many seller offers to return (default 10, max 30)." },
+      max_in_person: {
+        type: "number",
+        description:
+          "How many in-person shops to return (default 10, max 30). Torob carries them in the same response, so this costs nothing upstream.",
+      },
     },
     required: ["prk"],
   },
@@ -334,6 +366,7 @@ const detailsTool: ToolDef = {
     const prk = str(args.prk).trim();
     if (!prk) throw usageError("product_details needs a prk - the product id from a search_products card.");
     const maxOffers = clampLimit(args.max_offers, 10, 30);
+    const maxInPerson = clampLimit(args.max_in_person, 10, 30);
     const found = await productDetails(prk, { detailsUrl: args.details_url });
     const cheapest = found.cheapest_offer;
     const best = found.best_rated_offer;
@@ -372,6 +405,38 @@ const detailsTool: ToolDef = {
       ...(found.offers.length > maxOffers
         ? { offers_truncated: true, offers_returned: maxOffers, note: `${found.offer_count} offers exist; showing the ${maxOffers} cheapest.` }
         : {}),
+      // The in-person shops ride along in the same payload, so this section
+      // costs nothing upstream - but its prices are the shops' own and can be
+      // months old, which is why every row carries its own last-change date.
+      in_person_count: found.in_person_count,
+      in_person_sellers: found.in_person_sellers.slice(0, maxInPerson),
+      ...(found.in_person_count
+        ? {
+            in_person_note:
+              "These are shops selling this product in person. Each price is the shop's own and can be old - " +
+              "each row carries last_price_change_date so the age travels with the number.",
+          }
+        : {}),
+      ...(found.in_person_sellers.length > maxInPerson
+        ? {
+            in_person_truncated: true,
+            in_person_returned: maxInPerson,
+            in_person_truncated_note: `${found.in_person_count} in-person shops exist; showing the ${maxInPerson} cheapest.`,
+          }
+        : {}),
+      ...(found.in_person_map_url ? { in_person_map_url: found.in_person_map_url } : {}),
+      ...(found.price_range_toman ? { price_range_toman: found.price_range_toman } : {}),
+      ...(found.purchase_options ? { purchase_options: found.purchase_options } : {}),
+      ...(found.specs
+        ? {
+            specs: found.specs,
+            ...(found.specs_truncated ? { specs_truncated: true, specs_available: found.specs_available } : {}),
+          }
+        : {}),
+      ...(found.variants ? { variants: found.variants } : {}),
+      ...(found.category_path ? { category_path: found.category_path } : {}),
+      ...(found.is_authentic ? { is_authentic: true } : {}),
+      ...(found.has_wiki ? { has_wiki: true } : {}),
       attribution: found.attribution,
     };
   },
@@ -752,7 +817,21 @@ const locationsTool: ToolDef = {
     }
     if (!provinceId) {
       const found = await provinces();
-      return { mode: "provinces", count: Math.min(found.length, limit), provinces: found.slice(0, limit) };
+      // The five cities Torob's own users pick most, so an agent does not have
+      // to ask the user for a city id it could have guessed. One extra upstream
+      // request, cached for a day.
+      let popular: { id: string; name: string; province_id: string | null }[] = [];
+      try {
+        popular = await popularCities();
+      } catch {
+        // A failed hint must not turn a plain province list into an error.
+      }
+      return {
+        mode: "provinces",
+        count: Math.min(found.length, limit),
+        provinces: found.slice(0, limit),
+        ...(popular.length ? { popular_cities: popular } : {}),
+      };
     }
     const found = await cities(provinceId, search || undefined);
     return {
@@ -793,13 +872,281 @@ const offersTool: ToolDef = {
   },
 };
 
+// ----------------------------------------------------------- price history
+
+// The decision aid behind price_history, built only from the numbers Torob
+// charts - no interpretation of which series "should" win, and no claim about
+// the future. Persian series labels are Torob's own and travel as sent.
+function priceReading(chart: PriceChart): string | null {
+  const points = chart.series.flatMap((s) => s.points);
+  if (!points.length) return null;
+  const lowest = points.reduce((a, b) => (b.value < a.value ? b : a));
+  const highest = points.reduce((a, b) => (b.value > a.value ? b : a));
+  const latest = chart.series
+    .filter((s) => s.latest)
+    .map((s) => `${s.label} ${formatToman(s.latest?.value ?? null)} Toman (${s.latest?.date})`)
+    .join("; ");
+  return (
+    `Over the newest ${chart.window.points} monthly point(s) (${chart.window.from} to ${chart.window.to}) the lowest ` +
+    `figure Torob charts is ${formatToman(lowest.value)} Toman (${lowest.date}) and the highest ${formatToman(highest.value)} ` +
+    `(${highest.date}). Latest: ${latest}.`
+  );
+}
+
+const priceHistoryTool: ToolDef = {
+  name: "price_history",
+  title: "Price history and trend for one product",
+  description:
+    "Torob's own price chart for a product: monthly points going back years, each series carrying Torob's own label " +
+    "(the average and the lowest price it has charted), when the price was last updated, and - with include_changes - " +
+    "the newest price changes across its shops. This is the 'is now a good time to buy?' call: compare today's price " +
+    "with the lowest this product has been. Pass the prk from a search_products card together with that card's details_url.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      prk: { type: "string", description: "Product id from a search_products card (or a torob.com /p/<id>/ URL)." },
+      details_url: {
+        type: "string",
+        description: "The details_url from the same card, so the id resolves with no lookup.",
+      },
+      months: {
+        type: "number",
+        description: "How many monthly points to return, newest last (default 12, max 54).",
+      },
+      include_changes: {
+        type: "boolean",
+        description: "Also read Torob's newest price changes for this product. Costs one extra upstream request.",
+      },
+      changes_limit: { type: "number", description: "How many changes with include_changes (default 5, max 20)." },
+    },
+    required: ["prk"],
+  },
+  async run(args) {
+    const prk = str(args.prk).trim();
+    if (!prk) throw usageError("price_history needs a prk - the product id from a search_products card.");
+    const months = clampLimit(args.months, 12, 54);
+    const changesLimit = clampLimit(args.changes_limit, 5, 20);
+    const opts = { detailsUrl: args.details_url };
+
+    const chart = await productPriceChart(prk, months, opts);
+    const lastModified = await productLastModified(prk, opts);
+    const changes = args.include_changes === true ? await productPriceChanges(prk, changesLimit, opts) : null;
+
+    return {
+      prk,
+      window: chart.window,
+      points_available: chart.points_available,
+      series: chart.series,
+      ...(chart.points_available > chart.window.points
+        ? {
+            window_note: `Torob charts ${chart.points_available} monthly point(s) for this product; showing the newest ${chart.window.points}. Raise months to see more.`,
+          }
+        : {}),
+      reading: priceReading(chart),
+      last_modified: lastModified,
+      last_modified_note:
+        "Torob's own last price update for this product. Prices can move after it - confirm on torob.com before buying.",
+      ...(changes
+        ? {
+            changes_count: changes.count,
+            changes: changes.changes,
+            ...(changes.changes.length
+              ? { changes_note: "Newest first. Each entry is one shop's move, not this product's price everywhere." }
+              : { changes_note: "Torob lists no price changes for this product." }),
+          }
+        : {}),
+      ...(chart.series.length ? {} : { note: "Torob charts no price history for this product yet." }),
+      attribution: ATTRIBUTION,
+    };
+  },
+};
+
+// ------------------------------------------------------------- shop profile
+
+const shopProfileTool: ToolDef = {
+  name: "shop_profile",
+  title: "A seller's Torob profile and catalogue",
+  description:
+    "One Torob shop as Torob itself profiles it: trust seal (enamad) level and validity, score and percentile, how long " +
+    "it has been active, Torob's own notes about it (including any violation note), city and address, payment and " +
+    "delivery options, support hours and website. This is the 'is this seller any good?' call - pass the shop_id from a " +
+    "product_details offer. With include_products it also lists that shop's own catalogue as cards, cheapest first.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      shop_id: { type: "string", description: "Numeric shop id, from a product_details offer or from find_shops." },
+      include_products: {
+        type: "boolean",
+        description: "Also list this shop's own catalogue. Costs one extra upstream request.",
+      },
+      page: { type: "number", description: "Catalogue page, 1-based (default 1)." },
+      limit: { type: "number", description: "How many catalogue cards (default 10, max 24)." },
+    },
+    required: ["shop_id"],
+  },
+  async run(args) {
+    const shopId = str(args.shop_id).trim();
+    if (!shopId) throw usageError("shop_profile needs a shop_id - the numeric id on a product_details offer.");
+    const profile = await shopProfile(shopId);
+
+    let catalogue: Record<string, unknown> = {};
+    if (args.include_products === true) {
+      const page = clampPage(args.page, 20);
+      const limit = clampLimit(args.limit, 10, 24);
+      const found = await shopProducts(shopId, page, limit);
+      catalogue = {
+        catalogue_count: found.count,
+        catalogue_page: found.page,
+        catalogue_has_next_page: found.has_next_page,
+        catalogue_price_range_toman: { min: found.min_price_toman, max: found.max_price_toman },
+        catalogue_products: found.products,
+        ...(found.products.length < found.page_count
+          ? {
+              catalogue_truncated: true,
+              catalogue_note: `${found.page_count} cards were on this catalogue page; showing ${found.products.length}. Raise limit or page on.`,
+            }
+          : {}),
+      };
+    }
+
+    return {
+      ...profile,
+      ...catalogue,
+      next: args.include_products
+        ? "For one product's seller list, call product_details; for the rest of this shop's catalogue, page on."
+        : "Pass this shop_id with include_products for its catalogue, or use the offer's product in product_details.",
+      attribution: ATTRIBUTION,
+    };
+  },
+};
+
+// --------------------------------------------------------------- find shops
+
+const findShopsTool: ToolDef = {
+  name: "find_shops",
+  title: "Find a Torob shop by name or city",
+  description:
+    "Search Torob's SHOP directory - businesses, not products: by name, by city id, and narrowed to online or " +
+    "in-person sellers. Every row carries the id to pass to shop_profile. Use it when the user names a store or asks " +
+    "what shops there are; asking about products stays in search_products.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "A shop name or part of one, e.g. 'زوبین کالا' or 'موبایل'." },
+      city: { type: "string", description: "Delivery city id from list_locations, to narrow to one city." },
+      shop_type: { type: "string", enum: [...SHOP_TYPES], description: "offline = in-person sellers, online = online sellers." },
+      page: { type: "number", description: "1-based page (default 1)." },
+      limit: { type: "number", description: "How many shops (default 10, max 24)." },
+    },
+    required: [],
+  },
+  async run(args) {
+    const query = str(args.query).trim() || undefined;
+    const city = str(args.city).trim() || undefined;
+    const shopType = shopTypeOf(args.shop_type);
+    const page = clampPage(args.page, SHOP_PAGE_MAX);
+    const limit = clampLimit(args.limit, 10, 24);
+
+    const found = await findShops({ q: query, city, shopType, page, limit });
+    return {
+      query: query ?? null,
+      ...(city ? { city } : {}),
+      ...(shopType ? { shop_type: shopType } : {}),
+      total_shops: found.count,
+      page: found.page,
+      has_next_page: found.has_next_page,
+      shops: found.shops,
+      ...(found.shops.length === 0
+        ? { note: "No shop matched. Try a shorter name, or drop the city filter - the directory covers online and in-person sellers." }
+        : { note: "A shop id is what shop_profile needs; this list is not a product list." }),
+    };
+  },
+};
+
+// ---------------------------------------------------------- search by image
+
+const searchByImageTool: ToolDef = {
+  name: "search_by_image",
+  title: "Find products from a picture",
+  description:
+    "Find products from an image: pass a public http(s) image URL and Torob returns the products it matches, as cards. " +
+    "Torob fetches the image itself - there is no upload here - so the link has to be reachable from the internet. " +
+    "When Torob recognises the picture as one specific product, matched_product names it.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      image_url: { type: "string", description: "A public http(s) URL of the picture to search Torob with." },
+      page: { type: "number", description: "1-based page (default 1)." },
+      limit: { type: "number", description: "How many cards (default 10, max 30)." },
+    },
+    required: ["image_url"],
+  },
+  async run(args) {
+    const imageUrl = str(args.image_url).trim();
+    if (!imageUrl) throw usageError("search_by_image needs an image_url - a public link to the picture.");
+    const page = clampPage(args.page, 20);
+    const limit = clampLimit(args.limit, 10, 30);
+
+    const found = await searchByImage(imageUrl, page, limit);
+    return {
+      image_url: found.uploaded_image_url ?? imageUrl,
+      page: found.page,
+      has_next_page: found.has_next_page,
+      ...(found.matched_product ? { matched_product: found.matched_product } : {}),
+      ...(found.detected_objects.length ? { detected_objects: found.detected_objects } : {}),
+      products: found.products,
+      ...(found.products.length === 0
+        ? {
+            note:
+              "Torob matched nothing to this image. It may be unreachable, too small, or simply not in its catalogue - " +
+              "an empty answer is not proof the product does not exist.",
+          }
+        : { note: "Cards carry the cheapest offer only; call product_details for the sellers behind one." }),
+      attribution: ATTRIBUTION,
+    };
+  },
+};
+
+// ------------------------------------------------------------------ trends
+
+const trendsTool: ToolDef = {
+  name: "torob_trends",
+  title: "What Torob shoppers are searching right now",
+  description:
+    "Torob's own trending searches: the wordings shoppers are using right now, each with one sample product " +
+    "(carrying its prk and details_url, so it can be opened straight away). Use it for 'what is popular right now', " +
+    "or to seed a search when the user has no wording of their own. For Torob's featured deals - a different thing - " +
+    "use special_offers.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      limit: { type: "number", description: "How many trending searches (default 10, max 30)." },
+    },
+    required: [],
+  },
+  async run(args) {
+    const limit = clampLimit(args.limit, 10, 30);
+    const trends = await trendingSearches(limit);
+    return {
+      count: trends.length,
+      trends,
+      note: "Each item is a wording people search with, plus one product it currently returns.",
+    };
+  },
+};
+
 export const TOOLS: ToolDef[] = [
   suggestTool,
   searchTool,
   detailsTool,
+  priceHistoryTool,
   similarTool,
   compareTool,
   bestValueTool,
+  shopProfileTool,
+  findShopsTool,
+  searchByImageTool,
+  trendsTool,
   categoriesTool,
   locationsTool,
   offersTool,

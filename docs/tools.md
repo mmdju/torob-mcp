@@ -1,6 +1,6 @@
 # Tool reference
 
-Input/output reference for all **9 tools**. Types only - no internals. For conversation flows, see [examples/sample-calls.md](../examples/sample-calls.md).
+Input/output reference for all **14 tools**. Types only - no internals. For conversation flows, see [examples/sample-calls.md](../examples/sample-calls.md). The response types are also kept in [card.d.ts](card.d.ts).
 
 Every tool is **read-only** and needs **no credentials**. Result lists are **capped** (default 10, max 30). All prices are in **Toman**.
 
@@ -11,9 +11,14 @@ Which tool for what - the short version:
 | something vague, "قاب گوشی", "ارزون‌ترین" | `torob_suggest` |
 | "show me X", "X in Y under Z", "what is there?" | `search_products` |
 | "is this the same as that one?" (a specific product) | `product_details` |
+| "is now a good time to buy?", "has it got cheaper?" | `price_history` |
 | "that's too expensive, what else?" | `similar_products` |
 | "which of these should I buy?" | `compare_products` |
 | "best X under Y", "cheapest X" | `find_best_value` |
+| "is this seller reliable?", "what else does this shop sell?" | `shop_profile` |
+| "which shops are there?", "does فروشگاه X exist?" | `find_shops` |
+| "what is this in the picture?" | `search_by_image` |
+| "what is popular right now?" | `torob_trends` |
 | "what categories are there?" | `browse_categories` |
 | "what can I get delivered to X?" | `list_locations` |
 | "anything on deal?" | `special_offers` |
@@ -23,8 +28,11 @@ Shared conventions:
 - `limit` - how many items to return (default 10, max 30).
 - `page` - 1-based page number, max 50. Deep pages cost an extra upstream request; a clamped page comes back with `page_clamped`, `page_requested` and `page_note`.
 - `prk` - Torob's product id, as a UUID. It comes from a `search_products` card and can be passed back as a bare id, a `/p/<id>/` path, or a full `torob.com` product URL. Torob cannot look a product up by id alone, so an id is only usable after this server has returned it - or with the `details_url` from the same card, which resolves it with no server-side memory at all.
+- `shop_id` - a **numeric** shop id, from any offer in `product_details` or from `find_shops`. It is what `shop_profile` takes.
 - `price_toman: null` means **not available** - out of stock upstream, or no price at all. It is never 0, and 0 is never free.
 - `available: false` on a card or an offer is upstream's "not for sale right now".
+- **In-person prices are the shops' own and can be old.** Every in-person row carries `last_price_change_date` (Torob's wording, e.g. `"۸ ماه و ۹ روز پیش"`), so say how old a shelf price is instead of presenting it as today's.
+- **Torob's own labels travel as sent** - filter titles, series names (`"میانگین قیمت"`), shop notes, campaign names. Quote them rather than translating them into a claim.
 - **Bot challenge.** Torob answers a client that calls too often with HTTP 490 instead of data. It clears on its own after a few idle minutes. A challenged call is worth retrying later, not immediately; the server holds the rest of a burst for five minutes so it does not deepen the block.
 
 ## `torob_suggest`
@@ -47,15 +55,15 @@ Search Torob, get **compact cards**: the cheapest offer in Toman, the shop behin
 | `page` | number | 1-based, max 50 |
 | `sort` | string | `popularity` (default, most relevant) · `price` (cheapest first) · `expensive` (dearest first) · `newest` (newest first) · `sellers` (most sellers) |
 | `category` | string | Torob category id, from `suggested_categories` or `browse_categories` |
-| `brand` | string | Brand **slug** from the brand group of `available_filters` (`options[].value`, or the full list at its `values_url`), e.g. `apple-اپل`. A display name is mapped onto the slug when this search showed the brand group |
+| `brand` | string | Brand **slug** from the brand group of `available_filters` (`options[].value`, `brand_values`, or the full list at its `values_url`), e.g. `apple-اپل`. A display name is mapped onto the slug when this search showed the brand group |
 | `city` | string | Delivery-city id, from `list_locations` |
-| `shop_type` | string | `offline` (has a branch) · `online` (online sellers) |
+| `shop_type` | string | `offline` (products that have an in-person seller) · `online` (online sellers) |
 | `min_price_toman` | number | Only products at or above this price |
 | `max_price_toman` | number | Only products at or below this price |
 | `filters` | object | Values from `available_filters` of the same query, e.g. `{"available": "1", "storage": "1 tb"}`. A value the search does not offer is refused with the real ones |
 | `limit` | number | How many cards (default 10, max 30) |
 
-Returns: `total_matches`, `total_matches_note`, `page`, `page_count`, `has_next_page`, `price_range_toman` (`{min, max}`), `products[]`, `available_filters`, `filters_applied`, `sort_meaning`, `attribution`. `total_matches_note` is there because Torob's own count moves between identical requests - page with `has_next_page` instead of quoting the number.
+Returns: `total_matches`, `total_matches_note`, `page`, `page_count`, `has_next_page`, `price_range_toman` (`{min, max}`), `price_bounds_toman`, `products[]`, `available_filters`, `brand_values`, `filters_applied`, `sort_meaning`, `attribution`. `total_matches_note` is there because Torob's own count moves between identical requests - page with `has_next_page` instead of quoting the number.
 
 Each card: `prk`, `name_fa`, `name_en`, `price_toman`, `price_text`, `available`, `shop_name`, `image`, `image_count`, `badges[]`, `url`, `is_adv`, `details_url`.
 
@@ -71,6 +79,13 @@ A value from `options` is passed back as its `value`, not its display `name` - t
 
 `min_price_toman` / `max_price_toman` are first-class and compile to the `price__gt` / `price__lt` slugs; a reversed window is refused rather than returning nothing.
 
+### `price_bounds_toman` and `brand_values`
+
+Two things the filter groups cannot say in full:
+
+- `price_bounds_toman` - the price group's own floor and ceiling **for the result set** (`{min, max}`), which is the range Torob's own slider spans (measured: 47,985 to 444,480,000 on "هدفون"). `price_range_toman` is Torob's looser min/max on the response; when the two disagree, the bounds are the tighter, real one.
+- `brand_values` - the brands this search offers, as `{name, slug}` with the slug `brand` accepts. It appears only when the search offers **more brands than the preview group shows** (10), because below that they are already in `available_filters`; `brand_values_note` says so, and the note adds that the group's `values_url` has the rest if even this list is short.
+
 Honest-failure fields, present only when relevant:
 
 - `query_note` + `suggested_queries` - nothing matched; these are the wordings Torob suggests. **An empty result is not proof the product does not exist.**
@@ -81,13 +96,14 @@ Honest-failure fields, present only when relevant:
 
 ## `product_details`
 
-One product plus **every seller offer**, sorted cheapest available first. This is the call that answers "who sells this cheapest" and "is that shop any good".
+One product plus **every seller offer**, sorted cheapest available first, and **the shops that sell it in person**. This is the call that answers "who sells this cheapest", "is that shop any good" and "can I get it near me today".
 
 | Param | Type | Required | Notes |
 |---|---|---|---|
 | `prk` | string | **yes** | From a `search_products` card, or a torob.com product URL |
 | `details_url` | string | no | The `details_url` from the same card. Pass it back and the product opens with no lookup at all - the path that works on a Worker isolate that never saw the search |
 | `max_offers` | number | no | How many offers (default 10, max 30) |
+| `max_in_person` | number | no | How many in-person shops (default 10, max 30). They come in the same response, so this costs no extra request |
 
 Returns: the card fields, plus:
 
@@ -95,6 +111,7 @@ Returns: the card fields, plus:
 |---|---|
 | `offer_count` | How many sellers exist for this product |
 | `price_spread_toman` | Cheapest minus dearest available offer - the same product at different prices |
+| `price_range_toman` | Torob's own cheapest and dearest price for the product, before the seller list is sliced (`{min, max}`) |
 | `cheapest_offer` | The full cheapest offer object |
 | `best_rated_offer` | The **highest** `shop_score` among available offers; ties break on votes, then price |
 | `cheapest_delivered_offer` | Cheapest once stated postage is added - not always the same shop as `cheapest_offer` |
@@ -108,9 +125,68 @@ Each offer: `shop_name`, `shop_city`, `shop_id`, `shop_score` (0-5 or null), `sh
 
 - `postage_text` is Torob's own line ("هزینه ارسال رایگان" or a Toman amount); `postage_fee_toman` is that number parsed, `null` when postage is free or unstated, and `delivered_price_toman` is the price with it added.
 - `resolved_by: "name-search"` means the id was re-found through the product's name, not matched exactly - say so rather than presenting it as the same id.
-
 - `price_unreliable: true` is **Torob saying that price cannot be trusted**. Say so; do not present it as a bargain.
 - `shop_score` is `null` only when Torob sends no score. Torob sends a score for nearly every offer but almost never the vote count behind it, so `shop_votes` is often 0 even when `shop_score` is 5.
+- `shop_id` is what `shop_profile` takes next.
+
+### The in-person shops
+
+`in_person_count` is how many shops Torob lists for this product in a physical store; `in_person_sellers[]` is the cheapest `max_in_person` of them, and `in_person_map_url` is Torob's own map for them when it sends one. `in_person_note` says it plainly: these prices are the shops' own and can be old. When the list is cut, `in_person_truncated` / `in_person_returned` / `in_person_truncated_note` say so.
+
+Each row: `shop_name`, `shop_id`, `city`, `address`, `note` (the shop's own line, e.g. "تست و تحویل در حضور مشتری"), `price_toman`, `price_text`, `price_unreliable`, `is_open` (Torob's current state), `hours_status` / `hours_today` (its own words, e.g. `"بسته"` and `"تا ۰۹:۰۰ امروز"`), `last_price_change_date`, `fast_delivery`, `location` (`{lat, lon}`), `url` (the shop's torob.com page).
+
+### Specs, variants, category path, purchase options
+
+All of it rides along in the same response, so none of it costs an extra request:
+
+- `specs[]` - the product's own tables, flattened to `{group, key, value}`. Torob marks a table section with the literal value `"title"`; those markers are dropped, never handed back as a spec. `specs_truncated` + `specs_available` appear when there were more than 24 pairs.
+- `variants[]` - the variant tabs a product page shows (e.g. `"اصالت کالا"`), each `{title, count, items[]}` with up to 5 cards.
+- `category_path[]` - the categories above the product, without Torob's own root crumb.
+- `purchase_options[]` - Torob's quick purchase filters (guarantee, TorobPay credit), each with its own wording and `{price_from_text, online_sellers, offline_sellers}`.
+- `is_authentic` / `has_wiki` - Torob's own flips, present only when true. An absent `is_authentic` is **not** a claim that a product is fake.
+
+## `price_history`
+
+Torob's own price chart for one product: month-by-month points, when the price last moved, and - on request - the newest changes across its shops. "Is now a good time to buy?"
+
+| Param | Type | Required | Notes |
+|---|---|---|---|
+| `prk` | string | **yes** | From a `search_products` card, or a torob.com product URL |
+| `details_url` | string | no | The `details_url` from the same card, so the id resolves with no lookup |
+| `months` | number | no | How many monthly points to return, newest last (default 12, max 54) |
+| `include_changes` | boolean | no | Also read the newest price changes. **Costs one extra upstream request** |
+| `changes_limit` | number | no | How many changes with `include_changes` (default 5, max 20) |
+
+Returns:
+
+| Field | Notes |
+|---|---|
+| `series[]` | One entry per series Torob charts: `label` (Torob's own, e.g. `"میانگین قیمت"` / `"کمترین قیمت"`), `color`, `points[]` (`{date, value}` in Toman, oldest first), `latest`, `lowest`, `highest` |
+| `window` | `{from, to, points}` - the dates the returned points cover |
+| `points_available` | How many monthly points Torob charts in total, before `months` |
+| `reading` | One plain sentence built from those numbers - the lowest and highest figure charted, and the latest point of every series |
+| `last_modified` | Torob's own timestamp for this product's last price update |
+| `last_modified_note` | Why that timestamp is not a promise: prices move after it |
+| `changes[]` / `changes_count` | With `include_changes`: the newest entries, each `{title, description, time_ago}` in Torob's words |
+| `note` | Present only when Torob charts no history yet |
+
+- **The series labels are Torob's, not this server's.** Quote them; do not turn a chart into a forecast.
+- `points_available` larger than `window.points` means the chart is longer than the window you asked for - raise `months` instead of inventing what came before.
+- The chart is monthly and cached for six hours; the freshness line and the change feed for thirty minutes.
+
+## `similar_products`
+
+Products Torob considers comparable to the one you pass. This is the "that one is too expensive, what else?" call.
+
+| Param | Type | Required | Notes |
+|---|---|---|---|
+| `prk` | string | **yes** | A product id this server has already returned |
+| `details_url` | string | no | The `details_url` from the same card; proves the id is real without any lookup |
+| `limit` | number | no | How many (default 10, max 24) |
+
+Returns `prk`, `found`, `products[]` (cards, same shape as search), and a `note` saying whether to call `product_details` next. Cards carry the cheapest offer only.
+
+The product must be one this server has already returned. Torob cannot look a product up by id alone, so the id is confirmed first from what this server knows - and the error says to search first rather than failing silently.
 
 ## `compare_products`
 
@@ -144,19 +220,74 @@ With a budget the picks are sorted by price; without one they keep relevance ord
 
 When nothing fits, `best_value` is `null` and `budget_note` says so - including what the cheapest in-stock result actually was, so the answer is not a dead end. `suggested_queries` may also be present.
 
-## `similar_products`
+## `shop_profile`
 
-Products Torob considers comparable to the one you pass. This is the "that one is too expensive, what else?" call.
+One Torob shop as Torob itself profiles it - trust, contact terms and (on request) everything it sells. This is the "is this seller any good?" call.
 
 | Param | Type | Required | Notes |
 |---|---|---|---|
-| `prk` | string | **yes** | A product id this server has already returned |
-| `details_url` | string | no | The `details_url` from the same card; proves the id is real without any lookup |
+| `shop_id` | string | **yes** | The numeric `shop_id` from a `product_details` offer, or from `find_shops` |
+| `include_products` | boolean | no | Also list the shop's own catalogue. **Costs one extra upstream request** |
+| `page` | number | no | Catalogue page, 1-based (default 1) |
+| `limit` | number | no | How many catalogue cards (default 10, max 24) |
+
+Returns the profile:
+
+| Field | Notes |
+|---|---|
+| `shop_id`, `name`, `shop_type`, `city`, `province`, `address` | Who and where the shop is |
+| `website`, `logo`, `is_marketplace`, `url` | Its own site, its logo, and its torob.com page |
+| `status`, `active_since`, `active_time`, `last_updated` | Torob's own words (e.g. `"فعال"`, `"۵ ماه و ۳ هفته"`) |
+| `score`, `score_percentile` | Torob's score and where the shop sits against the rest |
+| `score_notes[]` | Torob's own sentences about this shop - **including any violation note**; quote them as sent |
+| `trust_seal` | `{level, valid_until, notes[]}` - the enamad seal's level, its validity and its notes |
+| `support` | `{schedule, badges[]}` - support hours and what it offers |
+| `payment[]`, `delivery[]`, `about[]` | Payment and delivery terms, and the shop's own intro blocks |
+| `guarantee` | Torob's guarantee status for this shop |
+
+With `include_products`: `catalogue_count` (how many products the shop lists), `catalogue_price_range_toman` (`{min, max}`), `catalogue_products[]` (the same card shape as a search), `catalogue_page`, `catalogue_has_next_page`, and `catalogue_truncated` / `catalogue_note` when the page held more than `limit`.
+
+An empty `payment` or `delivery` means Torob sent none for that shop, not that the shop offers none. A shop with `score_notes` containing a violation line should be reported with it.
+
+## `find_shops`
+
+Find a **shop** - a business, not a product - by name, and optionally narrowed by city and type.
+
+| Param | Type | Required | Notes |
+|---|---|---|---|
+| `query` | string | no | A shop name or part of one, e.g. `زوبین کالا`, `موبایل` |
+| `city` | string | no | Delivery city id from `list_locations` - narrows to shops that deliver there (measured: 11,124 shops down to 7,182) |
+| `shop_type` | string | no | `offline` (in-person sellers) · `online` |
+| `page` | number | no | 1-based (default 1, max 20) |
 | `limit` | number | no | How many (default 10, max 24) |
 
-Returns `prk`, `found`, `products[]` (cards, same shape as search), and a `note` saying whether to call `product_details` next. Cards carry the cheapest offer only.
+Returns `total_shops`, `page`, `has_next_page`, `shops[]` (each `id`, `name`, `city`, `shop_type`, `is_marketplace`, `logo`, `url`) and a `note`. **This is not a product list**: `search_products` is where products live, and a shop id here is what `shop_profile` wants next. A shop's own city can differ from the city filter, because the filter is about delivery.
 
-The product must be one this server has already returned. Torob cannot look a product up by id alone, so the id is confirmed first from what this server knows - and the error says to search first rather than failing silently.
+## `search_by_image`
+
+Find products from a picture. Pass a public image URL; Torob fetches it itself.
+
+| Param | Type | Required | Notes |
+|---|---|---|---|
+| `image_url` | string | **yes** | A public `http(s)` URL. Nothing is uploaded from here, so the link has to be reachable from the internet |
+| `page` | number | no | 1-based (default 1) |
+| `limit` | number | no | How many cards (default 10, max 30) |
+
+Returns `image_url` (Torob's echo of what it looked at), `page`, `has_next_page`, `products[]` (cards), `matched_product` when Torob recognised the image as one specific product, `detected_objects[]` when it says what it saw, and a `note`.
+
+Rules that are enforced: a non-URL or a non-`http(s)` URL is refused with a sentence, and an empty match says plainly that it is **not proof the product does not exist** - the picture may be unreachable, too small, or simply not in Torob's catalogue.
+
+## `torob_trends`
+
+What Torob's shoppers are searching **right now**.
+
+| Param | Type | Required | Notes |
+|---|---|---|---|
+| `limit` | number | no | How many trending searches (default 10, max 30) |
+
+Returns `count`, `trends[]` and a `note`. Each trend is `{query, category_id, sample}`, where `sample` is one product that wording currently returns - with the same card shape as a search, so its `prk` and `details_url` can be opened straight away.
+
+This is **what people type**, not what Torob is promoting: for the featured deals use `special_offers`. Refreshed every 30 minutes.
 
 ## `browse_categories`
 
@@ -182,6 +313,8 @@ Provinces, or a province's cities. City ids are what `search_products` accepts a
 | `limit` | number | no | How many (default 30, max 200) |
 
 Returns `mode` (`provinces` or `cities`), `count`, and `provinces[]` / `cities[]` with `id` and `name`. With only a `search` and no province, it searches cities nationwide.
+
+In provinces mode it also returns `popular_cities` - the cities Torob's own visitors pick most (تهران، مشهد، اصفهان، تبریز، شیراز) - so a city id does not have to be guessed. That hint costs one extra upstream request, cached for a day, and is omitted if it cannot be read.
 
 ## `special_offers`
 

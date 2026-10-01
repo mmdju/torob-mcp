@@ -2,7 +2,7 @@
 
 Torob MCP is a read-only public service. There is nothing to log in to and no user data is stored.
 
-- All 9 tools are read-only. No tool can change, delete or publish anything, and no shop is ever contacted.
+- All 14 tools are read-only. No tool can change, delete or publish anything, and no shop is ever contacted.
 - No API keys are needed to use the hosted endpoint.
 - The server never signs in to Torob and never solves or evades a bot challenge - a challenge is reported as a clear, actionable error instead.
 - Nothing is persisted server-side. The only state is a short-lived response cache and a small map of product ids the server handed out, both scoped to a single isolate.

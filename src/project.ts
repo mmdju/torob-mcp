@@ -16,7 +16,7 @@
 //    "فروشنده‌ها"). That list is the reason a Torob MCP exists at all, so it
 //    gets a first-class shape rather than being flattened into a string.
 
-import { ATTRIBUTION, MIN_SHOP_VOTES, SORT_PARAMS, TOROB_API, TTL, type Sort } from "./config.js";
+import { ATTRIBUTION, MIN_SHOP_VOTES, SORT_PARAMS, SOURCE, TOROB_API, TTL, type Sort } from "./config.js";
 import { cached } from "./cache.js";
 import { UpstreamError, torobGet } from "./http.js";
 import {
@@ -105,6 +105,21 @@ export interface ProductDetails extends ProductCard {
   cheapest_delivered_offer: Offer | null;
   /** How this id was resolved: exact-id, name-search, details-url, remembered or id-only. */
   resolved_by: string;
+  /** Torob's own cheapest and dearest price for this product, before slicing. */
+  price_range_toman?: { min: number | null; max: number | null };
+  /** How many shops sell this product in person (حضوری), before slicing. */
+  in_person_count: number;
+  in_person_sellers: InPersonSeller[];
+  /** torob.com's own map of those shops, when Torob sent the link. */
+  in_person_map_url?: string;
+  specs?: SpecItem[];
+  specs_truncated?: true;
+  specs_available?: number;
+  variants?: ProductVariant[];
+  category_path?: { id: string; title: string }[];
+  purchase_options?: PurchaseOption[];
+  is_authentic?: true;
+  has_wiki?: true;
   attribution: string;
 }
 
@@ -154,6 +169,26 @@ interface RawProduct {
   is_adv?: unknown;
   product_page_url?: unknown;
   products_info?: { result?: unknown };
+  // The details payload is the same one the product page renders, so it carries
+  // the in-person shop list, the spec tables and the variant tabs as well. They
+  // are read from here rather than fetched again: the response is already paid
+  // for (measured: ~300KB of json, of which the seller lists are the bulk).
+  products_in_store_info?: {
+    count?: unknown;
+    result?: unknown;
+    is_visible?: unknown;
+    map_sellers_url?: unknown;
+  };
+  key_specs?: unknown;
+  structural_specs?: unknown;
+  variants?: unknown;
+  breadcrumbs?: unknown;
+  filters?: { items?: unknown };
+  min_price?: unknown;
+  max_price?: unknown;
+  torob_category?: unknown;
+  is_authentic?: unknown;
+  has_wiki?: unknown;
 }
 
 export interface RawSearch {
@@ -383,6 +418,249 @@ export function offersOf(row: RawProduct): Offer[] {
   return out;
 }
 
+// --------------------------------------------------- in-person (حضوری) shops
+
+/** One shop that sells this product in person, as Torob lists it. */
+export interface InPersonSeller {
+  shop_name: string;
+  shop_id: string | null;
+  /** The shop's city, e.g. "مشهد". */
+  city: string | null;
+  /** Street address as Torob reports it (itself often truncated upstream). */
+  address: string | null;
+  /** The shop's own note, e.g. "تست و تحویل در حضور مشتری". */
+  note: string | null;
+  price_toman: number | null;
+  price_text: string | null;
+  /** Torob's own warning about this shelf price. */
+  price_unreliable: boolean;
+  is_open: boolean | null;
+  /** Torob's own line for today, e.g. "تا ۰۹:۰۰ امروز" or "باز است". */
+  hours_today: string | null;
+  /** Torob's own status word, e.g. "بسته". */
+  hours_status: string | null;
+  /**
+   * How long ago this shop's price was last touched, as Torob words it
+   * (measured: "8 ماه و 9 روز پیش" on a live row). A shelf price can be old,
+   * which is exactly why it travels with the number instead of being hidden.
+   */
+  last_price_change_date: string | null;
+  fast_delivery: boolean;
+  location: { lat: number; lon: number } | null;
+  /** The shop's page on torob.com, where its details live. */
+  url: string;
+}
+
+function locationOf(raw: any): { lat: number; lon: number } | null {
+  const lat = num(raw?.lat, NaN);
+  const lon = num(raw?.lon, NaN);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return { lat, lon };
+}
+
+function toInPersonSeller(raw: any): InPersonSeller | null {
+  const shop_name = short(raw?.shop_name, 80);
+  if (!shop_name) return null;
+  const price = num(raw?.price, 0) > 0 ? Math.round(num(raw.price, 0)) : tomanFromText(raw?.price_string ?? raw?.price_text);
+  const shopId = str(raw?.shop_id).trim();
+  return {
+    shop_name,
+    shop_id: shopId || null,
+    city: short(raw?.shop_name2, 60),
+    address: short(raw?.name1, 160),
+    note: short(raw?.name2, 120),
+    price_toman: price,
+    price_text: short(raw?.price_string ?? raw?.price_text, 80) ?? (price !== null ? `${formatToman(price)} تومان` : null),
+    price_unreliable: raw?.is_price_unreliable === true,
+    is_open: typeof raw?.is_open === "boolean" ? raw.is_open : null,
+    hours_today: short(raw?.working_hours?.title?.text, 60),
+    hours_status: short(raw?.working_hours?.title?.status, 20),
+    last_price_change_date: short(raw?.last_price_change_date, 60),
+    fast_delivery: raw?.supports_fast_delivery === true,
+    location: locationOf(raw?.location),
+    url: shopId
+      ? `https://torob.com/shop/${shopId}/`
+      : `https://torob.com/p/${str(raw?.prk).trim()}/`,
+  };
+}
+
+/** The in-person seller list a product's own details payload carries. */
+export function inPersonSellersOf(raw: RawProduct): {
+  count: number;
+  sellers: InPersonSeller[];
+  map_url: string | null;
+} {
+  const block = raw.products_in_store_info;
+  const rows = Array.isArray(block?.result) ? block.result : [];
+  const sellers: InPersonSeller[] = [];
+  for (const row of rows) {
+    const seller = toInPersonSeller(row);
+    if (seller) sellers.push(seller);
+  }
+  // Cheapest first, the same way the online offers are ordered, so "where is
+  // this cheapest in person" needs no second sort by the caller. A shop with
+  // no price sorts last rather than pretending to be cheapest.
+  sellers.sort((a, b) => {
+    if (a.price_toman === b.price_toman) return 0;
+    if (a.price_toman === null) return 1;
+    if (b.price_toman === null) return -1;
+    return a.price_toman - b.price_toman;
+  });
+  const link = str(block?.map_sellers_url).trim();
+  return {
+    count: sellers.length,
+    sellers,
+    map_url: /^https:\/\/torob\.com\//.test(link) ? link : null,
+  };
+}
+
+// ------------------------------------------------------ specs and variants
+
+/** One spec line. `group` is Torob's own table header when it sends one. */
+export interface SpecItem {
+  group: string | null;
+  key: string;
+  value: string;
+}
+
+// Torob marks a table section by sending the literal string "title" as the
+// value of the row that names it (measured: {بدنه: "title", وزن: "۱۶۰ گرم",
+// پلتفرم: "title"}). Keeping those would hand an agent a spec whose value is
+// the word "title", so they are dropped - but only that exact marker, never a
+// real value that happens to be short.
+const SPEC_GROUP_MARKER = "title";
+const SPEC_CAP = 24;
+
+function specValue(v: unknown): string | null {
+  if (Array.isArray(v)) {
+    const parts = v.map((x) => short(x, 120)).filter((x): x is string => Boolean(x));
+    return parts.length ? parts.join("، ") : null;
+  }
+  if (typeof v === "string" || typeof v === "number") {
+    const text = short(v, 160);
+    return text && text !== SPEC_GROUP_MARKER ? text : null;
+  }
+  return null;
+}
+
+/** The spec tables a product page shows, flattened into one capped list. */
+export function specsOf(raw: RawProduct): { items: SpecItem[]; available: number; truncated: boolean } {
+  const all: SpecItem[] = [];
+  const keySpecs = Array.isArray(raw.key_specs) ? raw.key_specs : [];
+  for (const block of keySpecs) {
+    const header = short((block as any)?.header, 80);
+    const items = Array.isArray((block as any)?.items) ? (block as any).items : [];
+    for (const item of items) {
+      const key = short((item as any)?.key ?? (item as any)?.title, 80);
+      const value = specValue((item as any)?.value);
+      if (key && value) all.push({ group: header, key, value });
+    }
+  }
+  const structural = raw.structural_specs as { headers?: unknown } | undefined;
+  const headers = Array.isArray(structural?.headers) ? (structural.headers as any[]) : [];
+  for (const block of headers) {
+    const header = short(block?.header, 80);
+    const specs = block?.specs && typeof block.specs === "object" ? (block.specs as Record<string, unknown>) : {};
+    for (const [key, value] of Object.entries(specs)) {
+      const text = specValue(value);
+      if (text) all.push({ group: header, key: short(key, 80) ?? key, value: text });
+    }
+  }
+  return {
+    items: all.slice(0, SPEC_CAP),
+    available: all.length,
+    truncated: all.length > SPEC_CAP,
+  };
+}
+
+/** The variant tabs a product page shows (e.g. "اصالت کالا"), as cards. */
+export interface ProductVariant {
+  title: string;
+  count: number;
+  items: ProductCard[];
+}
+
+const VARIANT_GROUPS = 3;
+const VARIANT_ITEMS = 5;
+
+export function variantsOf(raw: RawProduct): ProductVariant[] {
+  const list = Array.isArray(raw.variants) ? raw.variants : [];
+  const out: ProductVariant[] = [];
+  for (const group of list) {
+    const title = short((group as any)?.title, 80);
+    const items = Array.isArray((group as any)?.items) ? (group as any).items : [];
+    if (!title || !items.length) continue;
+    const cards: ProductCard[] = [];
+    for (const item of items) {
+      const card = toCard(item as RawProduct);
+      if (card) cards.push(card);
+      if (cards.length >= VARIANT_ITEMS) break;
+    }
+    if (cards.length) out.push({ title, count: items.length, items: cards });
+    if (out.length >= VARIANT_GROUPS) break;
+  }
+  return out;
+}
+
+/** The category path Torob shows above the product, without its root. */
+export function categoryPathOf(raw: RawProduct): { id: string; title: string }[] {
+  const list = Array.isArray(raw.breadcrumbs) ? raw.breadcrumbs : [];
+  const out: { id: string; title: string }[] = [];
+  for (const step of list) {
+    const id = str((step as any)?.cat_id ?? (step as any)?.id).trim();
+    const title = short((step as any)?.title, 80);
+    // The first crumb is always Torob itself (cat_id 0).
+    if (!title || id === "0") continue;
+    out.push({ id, title });
+  }
+  return out.slice(0, 6);
+}
+
+/**
+ * Torob's own quick purchase filters for this product ("دارای ضمانت ترب",
+ * "با اعتبار ترب‌پی"): the price it starts at and how many sellers behind it.
+ * They are reported as sent, because the wording and the price are Torob's.
+ */
+export interface PurchaseOption {
+  title: string;
+  price_from_text: string | null;
+  online_sellers: number | null;
+  offline_sellers: number | null;
+}
+
+const PURCHASE_OPTION_CAP = 6;
+
+export function purchaseOptionsOf(raw: RawProduct): PurchaseOption[] {
+  const items = Array.isArray(raw.filters?.items) ? (raw.filters?.items as any[]) : [];
+  const out: PurchaseOption[] = [];
+  for (const item of items) {
+    const title = short(item?.title, 80);
+    if (!title) continue;
+    const online = num(item?.online_shop_display_count, NaN);
+    const offline = num(item?.offline_shop_display_count, NaN);
+    out.push({
+      title,
+      price_from_text: short(item?.price_str, 60),
+      online_sellers: Number.isFinite(online) ? Math.max(0, Math.round(online)) : null,
+      offline_sellers: Number.isFinite(offline) ? Math.max(0, Math.round(offline)) : null,
+    });
+    if (out.length >= PURCHASE_OPTION_CAP) break;
+  }
+  return out;
+}
+
+/**
+ * The full price window Torob knows for this product: its own cheapest and
+ * dearest offer, straight from the details payload rather than from the
+ * (partially truncated) seller list this server hands back.
+ */
+export function priceWindowOf(raw: RawProduct): { min: number | null; max: number | null } | null {
+  const min = toman(raw.min_price);
+  const max = toman(raw.max_price);
+  if (min === null && max === null) return null;
+  return { min, max };
+}
+
 // ----------------------------------------------------------------- endpoints
 
 function searchKey(q: string, page: number, sort: string, category: string, shopType: string, filters: string): string {
@@ -412,6 +690,19 @@ export interface SearchResult {
   next_url: string | null;
   min_price_toman: number | null;
   max_price_toman: number | null;
+  /**
+   * The price group's own bounds for this result set (Torob sends the real
+   * minimum and maximum as a filter, measured: 47,985 to 444,480,000 on
+   * "هدفون"). It is the range of what is on this page set, not of the page.
+   */
+  price_bounds_toman: { min: number | null; max: number | null } | null;
+  /**
+   * Every brand this search offers, with the slug a `brand` filter needs. The
+   * brand group in available_filters is only a preview, so this is the list to
+   * read when the wanted brand is not in it.
+   */
+  brand_values: { name: string; slug: string }[];
+  brand_values_truncated?: true;
   /** Categories Torob suggested for this wording, so an agent can narrow down. */
   suggested_categories: { id: string; title: string }[];
   /** Every filter group this search accepts, with its slug. */
@@ -456,7 +747,9 @@ export interface FilterGroup {
 // caller can pass one back without a second call. Brand groups are a preview
 // plus their own values endpoint (their full list is not inlined), and price
 // groups are a range, not choices: they compile to price__gt / price__lt.
-const OPTION_PREVIEW = 10;
+// Exported because the tool layer names the preview size when it reports the
+// full brand list instead of the group's own excerpt.
+export const OPTION_PREVIEW = 10;
 const OPTION_CAP = 60;
 
 function optionValueOf(item: unknown): string {
@@ -518,6 +811,53 @@ export function filterKeyMap(groups: FilterGroup[]): Map<string, FilterGroup> {
     map.set(g.slug, g);
   }
   return map;
+}
+
+// The price group's own bounds: items are [{value, slug: "price__gt"}, {value,
+// slug: "price__lt"}], which is Torob telling the UI where its slider ends.
+// Read from the groups rather than from raw.min_price/max_price, because those
+// two move between identical requests (measured on the same query: 1125 then
+// 1200 results), while the bounds track the set that was actually returned.
+export function priceBoundsOf(raw: RawSearch): { min: number | null; max: number | null } | null {
+  const groups = [...(raw.filters1 ?? []), ...(raw.filters2 ?? [])];
+  let min: number | null = null;
+  let max: number | null = null;
+  for (const group of groups) {
+    if (!group || typeof group !== "object") continue;
+    const items = Array.isArray((group as any).items) ? (group as any).items : [];
+    for (const item of items) {
+      const slug = str((item as any)?.slug).trim();
+      const value = toman((item as any)?.value);
+      if (value === null) continue;
+      if (slug === "price__gt") min = value;
+      if (slug === "price__lt") max = value;
+    }
+  }
+  return min === null && max === null ? null : { min, max };
+}
+
+// The brand chips of a search: {id, slug, name1, name2}. This is the complete
+// list the search offers, whereas the brand group inside available_filters is a
+// preview (OPTION_PREVIEW entries) whose full list lives behind values_url.
+const BRAND_VALUE_CAP = 30;
+
+export function brandValuesOf(raw: RawSearch): { values: { name: string; slug: string }[]; truncated: boolean } {
+  const groups = Array.isArray(raw.attributes) ? raw.attributes : [];
+  const values: { name: string; slug: string }[] = [];
+  let total = 0;
+  for (const group of groups) {
+    if (str((group as any)?.type).trim() !== "brand") continue;
+    const items = Array.isArray((group as any)?.items) ? (group as any).items : [];
+    for (const item of items) {
+      const slug = str((item as any)?.slug).trim();
+      const name = short((item as any)?.name1 ?? (item as any)?.name2, 80);
+      if (!slug || !name) continue;
+      total += 1;
+      if (values.length < BRAND_VALUE_CAP) values.push({ name, slug });
+    }
+    break;
+  }
+  return { values, truncated: total > values.length };
 }
 
 // The filter groups a search taught us, remembered for the same query and the
@@ -593,6 +933,7 @@ function projectSearch(raw: RawSearch, opts: SearchOptions): SearchResult {
   for (const row of rows) rememberDetailUrl(row);
   const total = Math.max(0, Math.round(num(raw.count, 0)));
   const spell = raw.spellcheck as { corrected_query?: unknown; initial_query?: unknown } | undefined;
+  const brands = brandValuesOf(raw);
 
   return {
     products,
@@ -605,6 +946,9 @@ function projectSearch(raw: RawSearch, opts: SearchOptions): SearchResult {
     next_url: typeof raw.next === "string" ? raw.next : null,
     min_price_toman: toman(raw.min_price),
     max_price_toman: toman(raw.max_price),
+    price_bounds_toman: priceBoundsOf(raw),
+    brand_values: brands.values,
+    ...(brands.truncated ? { brand_values_truncated: true as const } : {}),
     suggested_categories: categoriesOf(raw.categories),
     // The filter groups and attributes this search would accept. Reporting
     // them is what lets an agent narrow down without a second discovery call,
@@ -924,6 +1268,17 @@ export async function productDetails(
           (a.price_toman ?? Number.POSITIVE_INFINITY) - (b.price_toman ?? Number.POSITIVE_INFINITY)
       )[0] ?? null;
 
+  // Everything below rides along in the payload this function already fetched:
+  // the in-person shop list, the spec tables, the variant tabs, the category
+  // path, the full price window and Torob's own quick purchase filters. None of
+  // it costs an extra upstream request, which is why it is not behind a flag.
+  const inPerson = inPersonSellersOf(raw);
+  const specs = specsOf(raw);
+  const priceWindow = priceWindowOf(raw);
+  const variants = variantsOf(raw);
+  const categoryPath = categoryPathOf(raw);
+  const purchaseOptions = purchaseOptionsOf(raw);
+
   return {
     ...base,
     offers,
@@ -933,8 +1288,46 @@ export async function productDetails(
     best_rated_offer: bestRated,
     cheapest_delivered_offer: delivered,
     resolved_by: resolved.resolvedBy,
+    ...(priceWindow ? { price_range_toman: priceWindow } : {}),
+    in_person_count: inPerson.count,
+    in_person_sellers: inPerson.sellers,
+    ...(inPerson.map_url ? { in_person_map_url: inPerson.map_url } : {}),
+    ...(specs.items.length
+      ? { specs: specs.items, ...(specs.truncated ? { specs_truncated: true, specs_available: specs.available } : {}) }
+      : {}),
+    ...(variants.length ? { variants } : {}),
+    ...(categoryPath.length ? { category_path: categoryPath } : {}),
+    ...(purchaseOptions.length ? { purchase_options: purchaseOptions } : {}),
+    ...(raw.is_authentic === true ? { is_authentic: true } : {}),
+    ...(raw.has_wiki === true ? { has_wiki: true } : {}),
     attribution: ATTRIBUTION,
   };
+}
+
+/**
+ * Confirm that a product id is one Torob will answer for. Every tool that
+ * opens a product by id needs the same proof: Torob's product endpoints take a
+ * bare prk but answer nothing for an id they cannot resolve, and a prk alone
+ * carries no search_id. Memory, the caller's details_url and a name search are
+ * tried in that order - the same path product_details walks.
+ */
+async function confirmedPrk(prkInput: string, opts?: ProductDetailsOptions): Promise<string> {
+  const wanted = str(prkInput).trim();
+  if (!wanted) throw new UpstreamError("Empty product id.", "usage");
+  const prk = idFrom(wanted);
+  const provided = detailsUrlOf(opts?.detailsUrl);
+  if (provided) rememberDetailUrl({ random_key: prk, more_info_url: provided } as RawProduct);
+  if (detailUrls.has(prk)) return prk;
+  const known = await rememberedInfo(prk);
+  if (known.url) return prk;
+  const found = await rowForId(prk, known.name, opts?.lookupBudget, str(opts?.query));
+  if (found) return prk;
+  throw new UpstreamError(
+    `No record of product '${wanted}' on this server, and Torob cannot look up a product by id alone. ` +
+      `Call search_products for what the user asked for first, then pass the prk and the details_url from ` +
+      `that result.`,
+    "usage"
+  );
 }
 
 /**
@@ -947,33 +1340,7 @@ export async function similarProducts(
   limit: number,
   opts?: ProductDetailsOptions
 ): Promise<ProductCard[]> {
-  const wanted = prkInput.trim();
-  if (!wanted) throw new UpstreamError("Empty product id.", "usage");
-  const prk = idFrom(wanted);
-  // similar-base-product takes a bare prk, but only for a product this server
-  // has actually seen: the endpoint answers nothing for an id it cannot
-  // resolve. So the id is confirmed first - by memory, by the details_url the
-  // caller echoed back, or by re-finding the product through a name search on a
-  // cold isolate.
-  const provided = detailsUrlOf(opts?.detailsUrl);
-  if (provided) rememberDetailUrl({ random_key: prk, more_info_url: provided } as RawProduct);
-  let confirmed = detailUrls.has(prk);
-  if (!confirmed) {
-    const known = await rememberedInfo(prk);
-    confirmed = known.url !== null;
-    if (!confirmed) {
-      const found = await rowForId(prk, known.name, opts?.lookupBudget, str(opts?.query));
-      confirmed = found !== null;
-    }
-  }
-  if (!confirmed) {
-    throw new UpstreamError(
-      `No record of product '${wanted}' on this server, and Torob cannot look up a product by id alone. ` +
-        `Call search_products for what the user asked for first, then call similar_products with the prk and ` +
-        `the details_url from that result.`,
-      "usage"
-    );
-  }
+  const prk = await confirmedPrk(prkInput, opts);
   const raw = await cached(`sim:${prk}`, TTL.similar, () =>
     torobGet<RawSearch>(
       `/v4/base-product/similar-base-product/?prk=${encodeURIComponent(prk)}&limit=24&source=torob_search`
@@ -982,6 +1349,500 @@ export async function similarProducts(
   const rows = Array.isArray(raw.results) ? (raw.results as RawProduct[]) : [];
   for (const row of rows) rememberDetailUrl(row);
   return rows.map(toCard).filter((c): c is ProductCard => c !== null).slice(0, limit);
+}
+
+// ---------------------------------------------------- price and shop calls
+
+/**
+ * Torob's own price chart for a product: monthly points, each series carrying
+ * its own label ("میانگین قیمت", "کمترین قیمت"). The upstream call takes only
+ * the prk - the site adds a timestamp to defeat its CDN, which this server
+ * deliberately does not do: the local TTL is what decides freshness, and a
+ * cache-buster on every call would turn a free read into a fresh round trip.
+ */
+export async function productPriceChart(
+  prkInput: string,
+  months: number,
+  opts?: ProductDetailsOptions
+): Promise<PriceChart> {
+  const prk = await confirmedPrk(prkInput, opts);
+  const raw = await cached(`ch:${prk}`, TTL.chart, () =>
+    torobGet<unknown>(`/v4/base-product/price-chart/?prk=${encodeURIComponent(prk)}`)
+  );
+  return priceChartOf(raw, months);
+}
+
+export interface PriceChangesResult {
+  /** How many changes Torob has on record for this product. */
+  count: number;
+  changes: PriceChange[];
+}
+
+/** Torob's own feed of price changes for one product, newest first. */
+export async function productPriceChanges(
+  prkInput: string,
+  limit: number,
+  opts?: ProductDetailsOptions
+): Promise<PriceChangesResult> {
+  const prk = await confirmedPrk(prkInput, opts);
+  const raw = await cached(`pc:${prk}:${limit}`, TTL.changes, () =>
+    torobGet<unknown>(`/v4/base-product/price-history/?prk=${encodeURIComponent(prk)}&page=0&size=${limit}`)
+  );
+  return priceChangesOf(raw, limit);
+}
+
+/** When Torob last changed this product's prices, as its own timestamp. */
+export async function productLastModified(prkInput: string, opts?: ProductDetailsOptions): Promise<string | null> {
+  const prk = await confirmedPrk(prkInput, opts);
+  const raw = (await cached(`lm:${prk}`, TTL.freshness, () =>
+    torobGet<unknown>(`/v4/base-product/last-modified-date/?prk=${encodeURIComponent(prk)}`)
+  )) as { last_modified_date?: unknown };
+  return short(raw?.last_modified_date, 40);
+}
+
+// Shop ids are numeric upstream. Checking the shape here means a mistyped id
+// gets a sentence about ids instead of a 404 from Torob.
+function shopIdOf(v: unknown): string {
+  const id = str(v).trim();
+  if (!/^\d{1,12}$/.test(id)) {
+    throw new UpstreamError(
+      `'${id}' is not a Torob shop id. A shop id is the numeric shop_id on a product_details offer, ` +
+        `or an id from find_shops.`,
+      "usage"
+    );
+  }
+  return id;
+}
+
+/** One shop's Torob profile page, projected. */
+export async function shopProfile(shopIdInput: unknown): Promise<ShopProfile> {
+  const id = shopIdOf(shopIdInput);
+  const raw = await cached(`sh:${id}`, TTL.shop, () =>
+    torobGet<unknown>(`/v4/internet-shop/details/?id=${encodeURIComponent(id)}`)
+  );
+  return shopProfileOf(raw, id);
+}
+
+export interface ShopCatalog {
+  shop_id: string;
+  /** How many products this shop has listed on Torob. */
+  count: number;
+  min_price_toman: number | null;
+  max_price_toman: number | null;
+  page: number;
+  /** How many cards this upstream page held, before our own `limit`. */
+  page_count: number;
+  has_next_page: boolean;
+  products: ProductCard[];
+}
+
+/** A shop's own catalogue, as search-style cards. */
+export async function shopProducts(shopIdInput: unknown, page: number, limit: number): Promise<ShopCatalog> {
+  const id = shopIdOf(shopIdInput);
+  const raw = (await cached(`spl:${id}:${page}`, TTL.shopProducts, () =>
+    torobGet<unknown>(`/v4/internet-shop/base-product/list/?shop_id=${encodeURIComponent(id)}&page=${Math.max(0, page - 1)}`)
+  )) as any;
+  const rows = Array.isArray(raw?.results) ? (raw.results as RawProduct[]) : [];
+  // The same rule as a search: every card we hand out stays resolvable.
+  for (const row of rows) rememberDetailUrl(row);
+  return {
+    shop_id: id,
+    count: Math.max(0, Math.round(num(raw?.count, rows.length))),
+    min_price_toman: toman(raw?.min_price),
+    max_price_toman: toman(raw?.max_price),
+    page,
+    page_count: rows.length,
+    has_next_page: typeof raw?.next === "string" && raw.next.length > 0,
+    products: rows.map(toCard).filter((c): c is ProductCard => c !== null).slice(0, limit),
+  };
+}
+
+export interface ShopSearchResult {
+  count: number;
+  page: number;
+  has_next_page: boolean;
+  shops: ShopSummary[];
+}
+
+/**
+ * Torob's shop directory: a search over SHOPS, not products. Kept apart from
+ * search_products on purpose - "موبایل" here means 11,124 businesses with that
+ * word in their name, not products.
+ */
+export async function findShops(opts: {
+  q?: string;
+  city?: string;
+  shopType?: string;
+  page: number;
+  limit: number;
+}): Promise<ShopSearchResult> {
+  const params = new URLSearchParams({
+    page: String(Math.max(0, opts.page - 1)),
+    size: "24",
+    shop_type: opts.shopType ?? "all",
+    show_blocks: "true",
+    has_payment: "false",
+  });
+  if (opts.q) params.set("q", opts.q);
+  if (opts.city) params.set("city", opts.city);
+  const raw = (await cached(`shs:${params.toString()}`, TTL.shops, () =>
+    torobGet<unknown>(`/v4/internet-shop/list/?${params.toString()}`)
+  )) as { count?: unknown; next?: unknown };
+  const { count, shops } = shopsOf(raw, opts.limit);
+  return {
+    count,
+    page: opts.page,
+    has_next_page: typeof raw?.next === "string" && raw.next.length > 0,
+    shops,
+  };
+}
+
+// Torob's image search takes a URL, not a file: the page's own upload path is
+// for pictures a browser picked, while this endpoint is what the result page
+// asks with. A card the agent already has an image URL for is therefore enough.
+export interface ImageSearchResult {
+  page: number;
+  page_count: number;
+  has_next_page: boolean;
+  /** Torob's echo of the image it looked at. */
+  uploaded_image_url: string | null;
+  /** Set when Torob recognised the image as one specific product. */
+  matched_product: ProductCard | null;
+  /** What Torob says it saw in the picture, when it says anything. */
+  detected_objects: string[];
+  products: ProductCard[];
+}
+
+function detectedObjectsOf(raw: any): string[] {
+  const out: string[] = [];
+  const push = (v: unknown) => {
+    const text = short(v, 60);
+    if (text && !out.includes(text)) out.push(text);
+  };
+  const sorted = raw?.detected_objects?.sorted;
+  if (Array.isArray(sorted)) {
+    for (const item of sorted) {
+      if (typeof item === "string") push(item);
+      else push(item?.name ?? item?.label ?? item?.title ?? item?.text ?? item?.class_name);
+    }
+  }
+  if (typeof raw?.detected_objects?.initial === "string") push(raw.detected_objects.initial);
+  return out.slice(0, 8);
+}
+
+export async function searchByImage(imageUrl: string, page: number, limit: number): Promise<ImageSearchResult> {
+  const wanted = imageUrl.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(wanted);
+  } catch {
+    throw new UpstreamError(
+      `search_by_image needs an http(s) image URL - '${wanted}' is not a URL. Torob fetches the image itself, ` +
+        `so the link has to be reachable from the internet.`,
+      "usage"
+    );
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new UpstreamError(
+      `search_by_image only accepts http(s) image URLs; '${parsed.protocol}' is not one.`,
+      "usage"
+    );
+  }
+  const params = new URLSearchParams({ image_url: parsed.toString(), page: String(Math.max(0, page - 1)), size: "24", source: SOURCE });
+  const raw = (await cached(`img:${page}:${parsed.toString()}`, TTL.image, () =>
+    torobGet<unknown>(`/v4/base-product/search-by-image/?${params.toString()}`)
+  )) as any;
+  const rows = Array.isArray(raw?.results) ? (raw.results as RawProduct[]) : [];
+  for (const row of rows) rememberDetailUrl(row);
+  return {
+    page,
+    page_count: rows.length,
+    has_next_page: typeof raw?.next === "string" && raw.next.length > 0,
+    uploaded_image_url: short(raw?.uploaded_image_url, 300),
+    matched_product: raw?.searched_product_info ? toCard(raw.searched_product_info) : null,
+    detected_objects: detectedObjectsOf(raw),
+    products: rows.map(toCard).filter((c): c is ProductCard => c !== null).slice(0, limit),
+  };
+}
+
+/**
+ * Torob's trending searches. The site sends `t=<now>` to defeat Torob's own
+ * CDN; here the value is rounded to this server's TTL window, so the data
+ * refreshes on the same rhythm as the cache without asking upstream for a
+ * fresh copy on every call.
+ */
+export async function trendingSearches(limit: number): Promise<TrendItem[]> {
+  const bucket = Math.floor(Date.now() / TTL.trends);
+  const raw = await cached(`tr:${bucket}`, TTL.trends, () =>
+    torobGet<unknown>(`/v4/search-trends/?t=${bucket}`)
+  );
+  return trendsOf(raw, limit);
+}
+
+/** The cities Torob's own users pick most, for a sensible default. */
+export async function popularCities(): Promise<City[]> {
+  const raw = (await cached("citypop", TTL.locations, () =>
+    torobGet<unknown>("/v4/city/most-visited/list/")
+  )) as unknown[];
+  const out: City[] = [];
+  for (const row of Array.isArray(raw) ? raw : []) {
+    const id = str((row as any)?.id ?? (row as any)?.city_id).trim();
+    const name = nameOf(row);
+    if (id && name) out.push({ id, name, province_id: null });
+  }
+  return out;
+}
+
+// ------------------------------------------------- price chart and changes
+
+export interface PricePoint {
+  /** Torob's own label for that month, e.g. "۲۶ مرداد ۱۴۰۵". */
+  date: string;
+  value: number;
+}
+
+export interface PriceSeries {
+  /** Torob's own series name, e.g. "میانگین قیمت" or "کمترین قیمت". */
+  label: string;
+  color: string | null;
+  points: PricePoint[];
+  latest: PricePoint | null;
+  lowest: PricePoint | null;
+  highest: PricePoint | null;
+}
+
+export interface PriceChart {
+  series: PriceSeries[];
+  /** How many monthly points Torob charts in total, before our own window. */
+  points_available: number;
+  window: { from: string | null; to: string | null; points: number };
+}
+
+// A chart point is {val, i}: the index is what ties it to its label, because
+// the series is sparse in places. Matching on array position instead of `i`
+// would shift every date by however many points are missing.
+function pointsOf(entries: unknown, labels: string[]): PricePoint[] {
+  const list = Array.isArray(entries) ? entries : [];
+  const points: { i: number; point: PricePoint }[] = [];
+  for (const entry of list) {
+    const i = Math.round(num((entry as any)?.i, NaN));
+    const value = num((entry as any)?.val, NaN);
+    const label = Number.isFinite(i) ? labels[i] : undefined;
+    if (!Number.isFinite(value) || !label) continue;
+    points.push({ i, point: { date: label, value: Math.round(value) } });
+  }
+  points.sort((a, b) => a.i - b.i);
+  return points.map((p) => p.point);
+}
+
+/** Project Torob's chart, keeping only the last `months` monthly points. */
+export function priceChartOf(raw: unknown, months: number): PriceChart {
+  const labels = Array.isArray((raw as any)?.labels) ? ((raw as any).labels as unknown[]).map((l) => str(l).trim()) : [];
+  const dataSets = Array.isArray((raw as any)?.dataSets) ? ((raw as any).dataSets as any[]) : [];
+  const series: PriceSeries[] = [];
+  let available = 0;
+  for (const set of dataSets) {
+    const all = pointsOf(set?.entries, labels);
+    available = Math.max(available, all.length);
+    const points = all.slice(Math.max(0, all.length - months));
+    if (!points.length) continue;
+    const byValue = [...points].sort((a, b) => a.value - b.value);
+    series.push({
+      label: short(set?.label, 60) ?? "series",
+      color: short(set?.color, 20),
+      points,
+      latest: points[points.length - 1] ?? null,
+      lowest: byValue[0] ?? null,
+      highest: byValue[byValue.length - 1] ?? null,
+    });
+  }
+  const longest = series.reduce<PriceSeries | null>((a, b) => (a && a.points.length >= b.points.length ? a : b), null);
+  return {
+    series,
+    points_available: available,
+    window: {
+      from: longest?.points[0]?.date ?? null,
+      to: longest?.points[longest.points.length - 1]?.date ?? null,
+      points: longest?.points.length ?? 0,
+    },
+  };
+}
+
+/** One entry of Torob's own price-change feed for a product. */
+export interface PriceChange {
+  title: string;
+  description: string | null;
+  time_ago: string | null;
+}
+
+export function priceChangesOf(raw: unknown, limit: number): { count: number; changes: PriceChange[] } {
+  const results = Array.isArray((raw as any)?.results) ? ((raw as any).results as any[]) : [];
+  const changes: PriceChange[] = [];
+  for (const row of results) {
+    const title = short(row?.title, 120);
+    if (!title) continue;
+    changes.push({
+      title,
+      description: short(row?.description, 200),
+      time_ago: short(row?.timeago, 40),
+    });
+    if (changes.length >= limit) break;
+  }
+  return { count: Math.max(0, Math.round(num((raw as any)?.count, changes.length))), changes };
+}
+
+// ------------------------------------------------------------ shop profiles
+
+export interface ShopProfile {
+  shop_id: string;
+  name: string | null;
+  shop_type: string | null;
+  city: string | null;
+  province: string | null;
+  address: string | null;
+  website: string | null;
+  logo: string | null;
+  is_marketplace: boolean;
+  /** Torob's own word for the shop's state, e.g. "فعال". */
+  status: string | null;
+  active_since: string | null;
+  active_time: string | null;
+  last_updated: string | null;
+  score: number | null;
+  score_percentile: number | null;
+  /** Torob's own sentences about this shop, including any violation note. */
+  score_notes: string[];
+  trust_seal: { level: string | null; valid_until: string | null; notes: string[] };
+  support: { schedule: string | null; badges: string[] } | null;
+  payment: string[];
+  delivery: string[];
+  about: { title: string; text: string; link: string | null }[];
+  guarantee: string | null;
+  url: string;
+}
+
+function stringsOf(raw: unknown, cap = 5, n = 200): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const item of raw) {
+    const text = typeof item === "string" ? short(item, n) : short((item as any)?.title ?? (item as any)?.text, n);
+    if (text) out.push(text);
+    if (out.length >= cap) break;
+  }
+  return out;
+}
+
+/** A Torob shop page's own data, projected. */
+export function shopProfileOf(raw: unknown, shopId: string): ShopProfile {
+  const j = (raw ?? {}) as any;
+  const domain = str(j.domain).trim();
+  const redirect = str(j.website_redirect_url).trim();
+  const website = /^https?:\/\//.test(redirect)
+    ? redirect
+    : /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(domain)
+      ? `https://${domain}`
+      : null;
+  const licenses = Array.isArray(j.licenses) ? (j.licenses as any[]) : [];
+  const sealNotes: string[] = [];
+  for (const license of licenses) {
+    for (const part of [license?.title, license?.description_1, license?.description_2]) {
+      const text = short(part, 160);
+      if (text) sealNotes.push(text);
+    }
+  }
+  const support = j.customer_support_info ?? null;
+  return {
+    shop_id: str(j.id, shopId),
+    name: short(j.name, 100),
+    shop_type: short(j.shop_type, 20),
+    city: short(j.city, 60),
+    province: short(j.province, 60),
+    address: short(j.address, 300),
+    website,
+    logo: short(j.logo_512 ?? j.shop_logo, 300),
+    is_marketplace: j.is_marketplace === true,
+    status: short(j.block_description, 60),
+    active_since: short(j.date_added, 60),
+    active_time: short(j.active_time, 60),
+    last_updated: short(j.last_updated, 80),
+    score: num(j.shop_score, 0) > 0 ? Math.round(num(j.shop_score, 0) * 10) / 10 : null,
+    score_percentile: Number.isFinite(num(j.score_percentile, NaN)) ? Math.round(num(j.score_percentile, 0)) : null,
+    score_notes: stringsOf(j.score_info, 5, 200),
+    trust_seal: {
+      level: short(j.enamad_level, 60),
+      valid_until: short(j.enamad_expire_date, 80),
+      notes: sealNotes.slice(0, 4),
+    },
+    support: support
+      ? { schedule: short(support.schedule, 120), badges: stringsOf(support.badges, 5, 80) }
+      : null,
+    payment: stringsOf(j.payment_info?.items, 5, 240),
+    delivery: stringsOf(j.delivery_info?.items, 5, 240),
+    about: (Array.isArray(j.additional_infos) ? j.additional_infos : [])
+      .slice(0, 4)
+      .map((info: any) => ({
+        title: short(info?.title, 80) ?? "",
+        text: short(info?.text, 320) ?? "",
+        link: short(info?.link, 300),
+      }))
+      .filter((info: any) => info.title || info.text),
+    guarantee: short(j.guarantee_info?.status, 20),
+    url: `https://torob.com/shop/${str(j.id, shopId)}/`,
+  };
+}
+
+/** A row of Torob's shop directory (its own search over shops). */
+export interface ShopSummary {
+  id: string;
+  name: string;
+  city: string | null;
+  shop_type: string | null;
+  is_marketplace: boolean;
+  logo: string | null;
+  url: string;
+}
+
+export function shopsOf(raw: unknown, limit: number): { count: number; shops: ShopSummary[] } {
+  const results = Array.isArray((raw as any)?.results) ? ((raw as any).results as any[]) : [];
+  const shops: ShopSummary[] = [];
+  for (const row of results) {
+    const id = str(row?.id).trim();
+    const name = short(row?.name, 120);
+    if (!id || !name) continue;
+    shops.push({
+      id,
+      name,
+      city: short(row?.city, 60),
+      shop_type: short(row?.shop_type, 20),
+      is_marketplace: row?.is_marketplace === true,
+      logo: short(row?.shop_logo, 300),
+      url: `https://torob.com/shop/${id}/`,
+    });
+    if (shops.length >= limit) break;
+  }
+  return { count: Math.max(0, Math.round(num((raw as any)?.count, shops.length))), shops };
+}
+
+// -------------------------------------------------------------- trends
+
+/** One trending search, with a sample product when Torob sends one. */
+export interface TrendItem {
+  query: string;
+  category_id: string | null;
+  sample: ProductCard | null;
+}
+
+export function trendsOf(raw: unknown, limit: number): TrendItem[] {
+  const list = Array.isArray(raw) ? raw : [];
+  const out: TrendItem[] = [];
+  for (const row of list) {
+    const query = short((row as any)?.query, 100);
+    if (!query) continue;
+    const sample = (row as any)?.partial_info ? toCard((row as any).partial_info) : null;
+    out.push({ query, category_id: str((row as any)?.category_id).trim() || null, sample });
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- categories

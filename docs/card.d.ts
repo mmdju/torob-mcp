@@ -72,6 +72,8 @@ export interface ProductDetails extends ProductCard {
   offer_count: number;
   /** Cheapest minus dearest available offer. */
   price_spread_toman: Toman | null;
+  /** Torob's own cheapest and dearest price, before the seller list is sliced. */
+  price_range_toman?: { min: Toman | null; max: Toman | null };
   cheapest_offer: Offer | null;
   /** The highest shop_score among available offers; ties break on votes. */
   best_rated_offer: Offer | null;
@@ -80,6 +82,56 @@ export interface ProductDetails extends ProductCard {
   /** How the id was found: remembered, details-url, exact-id, name-search, id-only. */
   resolved_by: string;
   attribution: string;
+}
+
+/**
+ * One shop selling this product in person. The price is the shop's own and can
+ * be months old, which is why `last_price_change_date` travels beside it.
+ */
+export interface InPersonSeller {
+  shop_name: string;
+  /** Numeric; what shop_profile takes. */
+  shop_id: string | null;
+  city: string | null;
+  address: string | null;
+  /** The shop's own note, e.g. "تست و تحویل در حضور مشتری". */
+  note: string | null;
+  price_toman: Toman | null;
+  price_text: string | null;
+  price_unreliable: boolean;
+  is_open: boolean | null;
+  /** Torob's own line for today, e.g. "تا ۰۹:۰۰ امروز". */
+  hours_today: string | null;
+  /** Torob's own status word, e.g. "بسته". */
+  hours_status: string | null;
+  /** Torob's wording, e.g. "۸ ماه و ۹ روز پیش". */
+  last_price_change_date: string | null;
+  fast_delivery: boolean;
+  location: { lat: number; lon: number } | null;
+  /** The shop's page on torob.com. */
+  url: string;
+}
+
+/** One spec line, with Torob's own table header when it sends one. */
+export interface SpecItem {
+  group: string | null;
+  key: string;
+  value: string;
+}
+
+/** A variant tab on the product page, e.g. "اصالت کالا". */
+export interface ProductVariant {
+  title: string;
+  count: number;
+  items: ProductCard[];
+}
+
+/** Torob's own quick purchase filter for this product. */
+export interface PurchaseOption {
+  title: string;
+  price_from_text: string | null;
+  online_sellers: number | null;
+  offline_sellers: number | null;
 }
 
 /** A filter group this search accepts. Read the slugs and options off these. */
@@ -111,9 +163,14 @@ export interface SearchResponse {
   page_count: number;
   has_next_page: boolean;
   price_range_toman: { min: Toman | null; max: Toman | null };
+  /** The price group's own floor and ceiling for this result set. */
+  price_bounds_toman?: { min: Toman | null; max: Toman | null };
   products: ProductCard[];
   /** The filter groups this search really accepts - 30 on a typical query. */
   available_filters: FilterGroup[];
+  /** Present only when the search offers more brands than the preview shows. */
+  brand_values?: { name: string; slug: string }[];
+  brand_values_note?: string;
   attribution: string;
   /** Present when nothing matched: an empty result is not proof of absence. */
   query_note?: string;
@@ -132,6 +189,8 @@ export interface DetailsResponse {
   url: string;
   offer_count: number;
   price_spread_toman: Toman | null;
+  /** Torob's own cheapest and dearest price for the product. */
+  price_range_toman?: { min: Toman | null; max: Toman | null };
   cheapest_offer: Offer | null;
   best_rated_offer: Offer | null;
   cheapest_delivered_offer: Offer | null;
@@ -141,6 +200,25 @@ export interface DetailsResponse {
   /** Present when postage changes which shop is cheapest overall. */
   cheapest_vs_delivered?: string;
   offers: Offer[];
+  /** How many shops sell this product in person, before max_in_person slices it. */
+  in_person_count: number;
+  in_person_sellers: InPersonSeller[];
+  /** Says plainly that a shelf price can be old. */
+  in_person_note?: string;
+  in_person_map_url?: string;
+  in_person_truncated?: boolean;
+  in_person_returned?: number;
+  in_person_truncated_note?: string;
+  /** Read from the same response: no extra upstream request. */
+  specs?: SpecItem[];
+  specs_truncated?: boolean;
+  specs_available?: number;
+  variants?: ProductVariant[];
+  category_path?: { id: string; title: string }[];
+  purchase_options?: PurchaseOption[];
+  /** Torob's own flip; absent means "not claimed", never "fake". */
+  is_authentic?: boolean;
+  has_wiki?: boolean;
   attribution: string;
 }
 
@@ -232,6 +310,8 @@ export interface LocationsResponse {
   count: number;
   provinces?: { id: string; name: string }[];
   cities?: { id: string; name: string; province_id: string | null }[];
+  /** The cities Torob's visitors pick most; provinces mode only. */
+  popular_cities?: { id: string; name: string; province_id: string | null }[];
   province_id?: string;
   search?: string;
   next?: string;
@@ -249,5 +329,133 @@ export interface SpecialOffer {
 export interface OffersResponse {
   count: number;
   offers: SpecialOffer[];
+  note: string;
+}
+
+/** One month on Torob's chart. `date` is Torob's own label, as sent. */
+export interface PricePoint {
+  date: string;
+  value: Toman;
+}
+
+/** One series of the chart, e.g. "میانگین قیمت" (average) or "کمترین قیمت". */
+export interface PriceSeries {
+  /** Torob's own series name; quote it rather than renaming it. */
+  label: string;
+  color: string | null;
+  /** Oldest first, inside the window that was asked for. */
+  points: PricePoint[];
+  latest: PricePoint | null;
+  lowest: PricePoint | null;
+  highest: PricePoint | null;
+}
+
+/** One entry of Torob's own price-change feed. */
+export interface PriceChange {
+  title: string;
+  description: string | null;
+  time_ago: string | null;
+}
+
+export interface PriceHistoryResponse {
+  prk: string;
+  window: { from: string | null; to: string | null; points: number };
+  /** How many monthly points Torob charts in total, before `months`. */
+  points_available: number;
+  series: PriceSeries[];
+  /** One plain sentence built from the numbers above. */
+  reading: string | null;
+  last_modified: string | null;
+  last_modified_note: string;
+  changes_count?: number;
+  changes?: PriceChange[];
+  changes_note?: string;
+  window_note?: string;
+  /** Present only when Torob charts nothing for this product yet. */
+  note?: string;
+  attribution: string;
+}
+
+export interface ShopProfileResponse {
+  shop_id: string;
+  name: string | null;
+  shop_type: string | null;
+  city: string | null;
+  province: string | null;
+  address: string | null;
+  website: string | null;
+  logo: string | null;
+  is_marketplace: boolean;
+  /** Torob's own word, e.g. "فعال". */
+  status: string | null;
+  active_since: string | null;
+  active_time: string | null;
+  last_updated: string | null;
+  score: number | null;
+  score_percentile: number | null;
+  /** Torob's own sentences, including any violation note. */
+  score_notes: string[];
+  trust_seal: { level: string | null; valid_until: string | null; notes: string[] };
+  support: { schedule: string | null; badges: string[] } | null;
+  payment: string[];
+  delivery: string[];
+  about: { title: string; text: string; link: string | null }[];
+  guarantee: string | null;
+  url: string;
+  /** Present only with include_products. */
+  catalogue_count?: number;
+  catalogue_page?: number;
+  catalogue_has_next_page?: boolean;
+  catalogue_price_range_toman?: { min: Toman | null; max: Toman | null };
+  catalogue_products?: ProductCard[];
+  catalogue_truncated?: boolean;
+  catalogue_note?: string;
+  next: string;
+  attribution: string;
+}
+
+/** One row of Torob's shop directory. */
+export interface ShopSummary {
+  id: string;
+  name: string;
+  city: string | null;
+  shop_type: string | null;
+  is_marketplace: boolean;
+  logo: string | null;
+  url: string;
+}
+
+export interface FindShopsResponse {
+  query: string | null;
+  city?: string;
+  shop_type?: string;
+  total_shops: number;
+  page: number;
+  has_next_page: boolean;
+  shops: ShopSummary[];
+  note: string;
+}
+
+export interface SearchByImageResponse {
+  /** Torob's echo of the image it looked at. */
+  image_url: string;
+  page: number;
+  has_next_page: boolean;
+  /** Present when Torob recognised the picture as one specific product. */
+  matched_product?: ProductCard;
+  detected_objects?: string[];
+  products: ProductCard[];
+  note: string;
+  attribution: string;
+}
+
+export interface TrendsResponse {
+  count: number;
+  trends: {
+    query: string;
+    category_id: string | null;
+    /** One product that wording currently returns; open it by prk. */
+    sample: ProductCard | null;
+  }[];
   note: string;
 }

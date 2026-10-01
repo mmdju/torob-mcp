@@ -21,7 +21,7 @@ flowchart LR
 What this means:
 
 - **Stateless.** Every request stands alone - no sessions, no accounts, nothing to log in to.
-- **Read-only.** All 9 tools carry `readOnlyHint`. Nothing here can change, delete or post anything, and no shop is ever contacted.
+- **Read-only.** All 14 tools carry `readOnlyHint`. Nothing here can change, delete or post anything, and no shop is ever contacted.
 - **No storage.** The only memory is a short-lived response cache (minutes, per isolate, with a 12MB byte budget so one 1.4MB details payload cannot fill the isolate) and a small map of product ids this server handed out, so a `prk` can be resolved back to its seller list. A name and details URL learned from a search also travel through the per-colo Cache API, and the filter groups a query advertised are remembered for 30 minutes. Prices are re-read from Torob every time the cache expires.
 - **Projected, not passed through.** A Torob search page is roughly 70KB of ranking metadata, experiment ids and ad plumbing. Every tool returns a compact record built by the server's projection layer instead.
 - **Rate-limit aware.** Upstream calls are serialized with a gap, retried on transient failures with backoff, and abandoned fast on a hard failure - the MCP client usually times out before a long retry loop finishes. Torob does not throttle with a 429; a caller that goes too fast gets a bot challenge, handled below.
@@ -38,7 +38,9 @@ What works is the `more_info_url` each search row carries: a ready-made absolute
 3. Without the URL, the server falls back to what it remembers (in-process map, then the per-colo cache), then to searching by the product's **name** and matching the id again.
 4. Last, it tries the details endpoint with the id alone. Whatever answered, `resolved_by` says which path it was - `remembered`, `details-url`, `exact-id`, `name-search` or `id-only` - so a name match is never presented as the exact id.
 
-The seller list - the reason a Torob MCP exists - lives at `products_info.result[]` upstream ("فروشنده‌ها"). It is projected into a first-class `offers[]` array, not flattened into a string.
+The seller list - the reason a Torob MCP exists - lives at `products_info.result[]` upstream ("فروشنده‌ها"). It is projected into a first-class `offers[]` array, not flattened into a string. The same response also carries the **in-person** shops (`products_in_store_info`, "فروشگاه‌های حضوری"), the spec tables and the variant tabs, so those reach the caller with no extra upstream request; only their size is capped by the projection.
+
+The price tools are one hop each, keyed by the same `prk`: Torob's chart (`/v4/base-product/price-chart/`, monthly points, two labelled series), its change feed (`/v4/base-product/price-history/`) and the timestamp of its last price update (`/v4/base-product/last-modified-date/`). Each is cached (six hours for the chart, thirty minutes for the others) because a monthly series does not move faster than that. Two upstream families answer about shops rather than products: `/v4/internet-shop/details/` (the shop page's own data) and `/v4/internet-shop/list/` plus `/v4/internet-shop/base-product/list/` for the directory and a shop's catalogue. Image search takes an image URL rather than an upload (`/v4/base-product/search-by-image/`), so nothing a caller sends is stored, and the trending list is read from `/v4/search-trends/` on the same half-hour rhythm as its cache.
 
 ## The bot wall, and what the server does about it
 

@@ -66,6 +66,17 @@ if (more) {
   const offers = details.json?.products_info?.result ?? [];
   out.push(`  products_info.title=${details.json?.products_info?.title ?? "MISSING"}`);
   out.push(`  offers=${offers.length}`);
+  // The in-person shops, the spec tables and the variant tabs ride along in
+  // this same response - the price the server pays for them is nothing, so what
+  // matters is that they are still there.
+  const inStore = details.json?.products_in_store_info?.result ?? [];
+  out.push(
+    `  in-person shops=${inStore.length} (title=${details.json?.products_in_store_info?.title ?? "MISSING"})`
+  );
+  out.push(
+    `  specs=${details.json?.key_specs?.length ?? 0} key / ${details.json?.structural_specs?.headers?.length ?? 0} table(s), ` +
+      `variants=${details.json?.variants?.length ?? 0}, breadcrumbs=${details.json?.breadcrumbs?.length ?? 0}`
+  );
   if (offers.length) {
     const o = offers[0];
     out.push(`  offer fields: ${Object.keys(o).join(",")}`);
@@ -77,17 +88,38 @@ if (more) {
   out.push("no more_info_url on the first row - the 2-hop detail path is gone");
 }
 
-// 3. the endpoints this server does not use yet, checked so changes are noticed
-for (const [path, label] of [
+// 3. every other endpoint a tool relies on, checked so an upstream change shows
+// up here before it shows up as a wrong answer. The shop and price rows are
+// keyed on ids taken from the search result above, so this stays a real probe
+// rather than a list of guesses.
+const shopId = search.json?.results?.[0]?.shop_id;
+const prk = rows[0]?.random_key;
+const ENDPOINTS = [
   ["/suggestion2/?q=phone&source=next_desktop", "suggestion2"],
+  [`/v4/base-product/price-chart/?prk=${prk}`, "price chart"],
+  [`/v4/base-product/price-history/?prk=${prk}&page=0&size=10`, "price changes"],
+  [`/v4/base-product/last-modified-date/?prk=${prk}`, "price freshness"],
   ["/v4/search-trends/?t=1", "search-trends"],
   ["/v4/special-offers/?page=0", "special-offers"],
   ["/v4/city/list/?size=5", "city list"],
+  ["/v4/city/most-visited/list/", "popular cities"],
   ["/v4/province/list/?size=5", "province list"],
   ["/v4/category/price-list-nested/?id=105&page=0&size=10", "category price-list"],
-]) {
+  ["/v4/internet-shop/list/?q=%D9%85%D9%88%D8%A8%D8%A7%DB%8C%D9%84&page=0&size=5&shop_type=all", "shop directory"],
+  [shopId ? `/v4/internet-shop/details/?id=${shopId}` : null, "shop profile"],
+  [shopId ? `/v4/internet-shop/base-product/list/?shop_id=${shopId}&page=0` : null, "shop catalogue"],
+  [prk ? `/v4/base-product/map/sellers/?prk=${prk}` : null, "in-person sellers (map)"],
+];
+for (const [path, label] of ENDPOINTS) {
+  if (!path) {
+    out.push(`${label.padEnd(34)} skipped - no id in the search result above`);
+    continue;
+  }
   const r = await get(path, label);
-  if (r.json && Array.isArray(r.json) && r.json.length) out.push(`  sample: ${JSON.stringify(r.json[0]).slice(0, 100)}`);
+  if (r.json) {
+    const sample = Array.isArray(r.json) ? r.json[0] : r.json.results?.[0] ?? r.json;
+    out.push(`  sample: ${JSON.stringify(sample).slice(0, 100)}`);
+  }
   await sleep(1200);
 }
 

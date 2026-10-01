@@ -77,27 +77,37 @@ const expected = [
   "browse_categories",
   "compare_products",
   "find_best_value",
+  "find_shops",
   "list_locations",
+  "price_history",
   "product_details",
+  "search_by_image",
   "search_products",
+  "shop_profile",
   "similar_products",
   "special_offers",
   "torob_suggest",
+  "torob_trends",
 ];
 JSON.stringify(tools) === JSON.stringify(expected) ? ok("tools/list", `${tools.length} tools`) : bad("tools/list", tools.join(", "));
 
 // 7. the tools answer against the live API
 // Torob does not throttle with a 429 - it challenges a client that calls too
 // often, and the block then covers every endpoint for about five idle
-// minutes. Measured, a full nine-tool sweep is walled partway through at any
-// gap short of roughly 30s, so this walks the tools one at a time and stops
-// at the first challenge. A challenge is Torob's answer, not a broken deploy:
-// it is reported and the run exits 0, because the wall is upstream's
+// minutes. Measured, a full sweep is walled partway through at any gap short
+// of roughly 30s, so this walks the tools one at a time, lightest first, and
+// stops at the first challenge. A challenge is Torob's answer, not a broken
+// deploy: it is reported and the run exits 0, because the wall is upstream's
 // behaviour and the contract checks above it already passed.
-const gap = Number(process.argv[3] ?? 12000);
+const gap = Number(process.argv[3] ?? 15000);
 const pause = () => new Promise((r) => setTimeout(r, gap));
 let id = 3;
 let challenged = false;
+
+// A Torob-hosted picture, used as a stable public URL for search_by_image.
+// Torob fetches the link itself, and recognising nothing is a legitimate
+// answer - the check below is about the shape, not about a match.
+const IMAGE_URL = "https://image.torob.com/base/images/8_/oJ/8_oJN_VQScbbQBux.jpg";
 
 const isChallenge = (text) => /challenge|challenged|retry in about|490/i.test(text);
 
@@ -118,6 +128,8 @@ try {
     ? ok("filter values", `${withOptions.slug}: ${withOptions.options.length} option(s)`)
     : bad("filter values", "no group carries its values");
   search.total_matches_note ? ok("count is labelled approximate") : bad("count note", "total_matches_note missing");
+  // The cheapest and dearest price Torob saw for this query ride along.
+  search.price_bounds_toman ? ok("search price bounds", `${search.price_bounds_toman.min} to ${search.price_bounds_toman.max}`) : bad("search price bounds", "price_bounds_toman missing");
   await pause();
 
   // A value the search itself advertised must round-trip through `filters`.
@@ -142,6 +154,47 @@ try {
     details.offers?.[0] && "postage_fee_toman" in details.offers[0]
       ? ok("offer carries its postage")
       : bad("offer postage", "postage_fee_toman missing");
+    // The in-person sellers, the spec tables and the price window ride along
+    // in the same upstream response; what matters is that they are still there.
+    details.in_person_count !== undefined
+      ? ok("in-person sellers", `${details.in_person_count} shops`)
+      : bad("in-person sellers", "in_person_count missing");
+    // The spec tables ride along in the same response. The cheapest card of a
+    // broad search can be a bare accessory with none, so the check walks the
+    // cards this run already holds until one carries a spec table.
+    let specRows = Array.isArray(details.specs) ? details.specs : null;
+    for (const card of search.products.slice(1, 3)) {
+      if (specRows) break;
+      const extra = await call("product_details", { prk: card.prk, details_url: card.details_url, max_offers: 1 }, id++);
+      if (Array.isArray(extra.specs) && extra.specs.length) specRows = extra.specs;
+      else await pause();
+    }
+    specRows
+      ? ok("spec tables", `${specRows.length} spec row(s)`)
+      : bad("spec tables", "no spec table on any of the first three cards - the shape may have changed");
+    await pause();
+
+    // The chart is Torob's own: monthly points plus the shop-level changes.
+    // The first card of a phone search is normally charted; when it is not, the
+    // next card is tried before the shape is called broken. An empty chart and
+    // a renamed upstream field look the same from here, so the live check needs
+    // a card that really charts something.
+    let chart = null;
+    let chartPoints = 0;
+    for (const card of search.products.slice(0, 3)) {
+      const attempt = await call("price_history", { prk: card.prk, details_url: card.details_url, months: 6, include_changes: true, changes_limit: 3 }, id++);
+      const points = (attempt.series ?? []).reduce((n, s) => n + (s.points?.length ?? 0), 0);
+      if (points >= 2) {
+        chart = attempt;
+        chartPoints = points;
+        break;
+      }
+      await pause();
+    }
+    chart
+      ? ok("price_history", `${chartPoints} chart point(s) over ${chart.window?.points} month(s), ${chart.changes_count ?? "no"} change(s)`)
+      : bad("price_history", "Torob charts no points for the first two search cards - the chart shape may have changed");
+    chart?.reading ? ok("price reading", "a plain-language sentence travels with the chart") : bad("price reading", "reading missing");
     await pause();
 
     const similar = await call("similar_products", { prk: first.prk, limit: 3 }, id++);
@@ -157,7 +210,43 @@ try {
         : bad("compare_products", `only ${cmp.compared}/${cmp.requested} resolved`);
       await pause();
     }
+
+    // The shop behind the cheapest offer answers with its own profile, and
+    // with its catalogue when asked for one.
+    const shopId = details.offers?.find((o) => o.shop_id)?.shop_id;
+    if (shopId) {
+      const profile = await call("shop_profile", { shop_id: shopId, include_products: true, limit: 3 }, id++);
+      profile.name && profile.url === `https://torob.com/shop/${shopId}/`
+        ? ok("shop_profile", `${profile.name}`)
+        : bad("shop_profile", `name=${profile.name ?? "missing"} url=${profile.url ?? "missing"}`);
+      profile.trust_seal && typeof profile.trust_seal === "object"
+        ? ok("shop trust seal", profile.trust_seal.level ?? "sent without a level")
+        : bad("shop trust seal", "trust_seal missing");
+      profile.catalogue_count !== undefined
+        ? ok("shop catalogue", `${profile.catalogue_count} products listed`)
+        : bad("shop catalogue", "catalogue_count missing with include_products");
+      await pause();
+    }
   }
+
+  // The shop directory is its own search - businesses, not products.
+  const shops = await call("find_shops", { query: "موبایل", limit: 5 }, id++);
+  shops.shops?.length && shops.shops[0].id
+    ? ok("find_shops", `${shops.total_shops} shops, first id ${shops.shops[0].id}`)
+    : bad("find_shops", "no shops and no note");
+  await pause();
+
+  // Torob fetches the picture itself, so this needs a publicly reachable URL.
+  const image = await call("search_by_image", { image_url: IMAGE_URL, limit: 3 }, id++);
+  Array.isArray(image.products)
+    ? ok("search_by_image", image.products.length ? `${image.products.length} cards` : "no cards, explained in the note")
+    : bad("search_by_image", "products missing");
+  if (!image.products.length && !image.note) bad("search_by_image note", "an empty match must explain itself");
+  await pause();
+
+  const trends = await call("torob_trends", { limit: 10 }, id++);
+  trends.trends?.length ? ok("torob_trends", `${trends.count} trending wordings`) : bad("torob_trends", "none returned");
+  await pause();
 
   // Budgets here are the real market: a phone case runs from ~20,000 Toman to
   // tens of millions, so 1.5M is a normal ask and returns matches.
@@ -171,6 +260,8 @@ try {
 
   const locs = await call("list_locations", {}, id++);
   locs.provinces?.length ? ok("list_locations", `${locs.count} provinces`) : bad("list_locations");
+  // The five cities Torob's own users pick most, so an agent can suggest one.
+  locs.popular_cities?.length ? ok("popular cities", `${locs.popular_cities.length} cities`) : bad("popular cities", "popular_cities missing");
   await pause();
 
   const offers = await call("special_offers", { limit: 5 }, id++);
@@ -178,8 +269,8 @@ try {
 } catch (err) {
   // A challenge is Torob's answer, not a broken deployment. It is reported as
   // the finding it is, and it does not fail the run: the wall is upstream's
-  // behaviour, the contract checks above it already passed, and the retry job
-  // in the workflow picks the remaining tools up once the block clears.
+  // behaviour, the contract checks above it already passed, and the next
+  // scheduled run picks the remaining tools up once the block clears.
   if (err.challenged) {
     challenged = true;
     console.log(`  wall Torob challenged the sweep - ${String(err.message).slice(0, 160)}`);

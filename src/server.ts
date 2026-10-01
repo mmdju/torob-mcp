@@ -9,7 +9,7 @@ import { UpstreamError } from "./http.js";
 import { setWaitUntil, type WaitUntil } from "./project.js";
 import { READ_ONLY, TOOLS } from "./tools.js";
 
-export const VERSION = "0.3.0";
+export const VERSION = "0.4.0";
 
 // Server-level guidance: cheaper than repeating it in every tool description,
 // and it steers the agent before it picks a tool at all. It is the first thing
@@ -19,13 +19,26 @@ export const INSTRUCTIONS = [
   "Torob (Iran's price-comparison engine) price intelligence. Read-only, no API key needed.",
   "All prices are in Toman.",
   "Pick the entry point: torob_suggest when the wording is vague, search_products to browse, " +
-  "product_details for one product's seller list, similar_products for 'what else is like this', " +
+  "product_details for one product's seller list and the shops selling it in person, price_history for whether " +
+  "now is a good time to buy, similar_products for 'what else is like this', " +
   "compare_products to put 2-5 products side by side, find_best_value for any question with a budget " +
-  "or the word 'best', browse_categories to walk the category tree, list_locations for province and city " +
+  "or the word 'best', shop_profile when the seller itself is the question, find_shops to locate a shop by name " +
+  "or city, search_by_image when the user shares a picture link, torob_trends for what shoppers are searching " +
+  "right now, browse_categories to walk the category tree, list_locations for province and city " +
   "ids, special_offers for the deals Torob is featuring.",
   "A search card carries the CHEAPEST offer only, not every seller. To answer 'who sells this' or " +
   "'is that shop reliable' call product_details - that is where the full seller list, shop scores and " +
-  "vote counts live.",
+  "vote counts live - and shop_profile for the shop behind any offer's shop_id.",
+  "product_details also returns what Torob already knows and a card does not: the in_person_sellers selling this " +
+  "product in a physical shop, with city, address, price and whether the shop is open, plus the spec tables, the " +
+  "variant tabs and Torob's own price_range_toman. An in-person price is that shop's own and can be months old, " +
+  "so read its last_price_change_date out loud rather than presenting a shelf price as today's.",
+  "price_history answers 'is now a good time to buy': Torob's own monthly chart for one product, its lowest and " +
+  "highest charted figures, when the price was last updated, and - with include_changes - the newest moves across " +
+  "its shops. The series labels are Torob's; quote them as such instead of inventing a trend.",
+  "search_by_image takes a public image URL and nothing else, and its matched_product names the one product Torob " +
+  "recognised in the picture, when it recognised one. shop_profile's include_products lists a shop's own " +
+  "catalogue; pair it with the shop_id from a product_details offer.",
   "Every search returns available_filters - the filter groups that search really accepts, with their " +
   "slugs and the values each takes. Pass those values back in filters, or use min_price_toman / " +
   "max_price_toman for a price window. Torob ignores a slug or value it does not know and answers " +

@@ -37,6 +37,15 @@ test("instructions name no tool that does not exist", () => {
     "total_matches",
     "has_next_page",
     "resolved_by",
+    "in_person_sellers",
+    "last_price_change_date",
+    "price_range_toman",
+    "include_changes",
+    "matched_product",
+    "include_products",
+    "shop_id",
+    "image_url",
+    "shop_type",
   ]);
   for (const token of INSTRUCTIONS.match(/\b[a-z][a-z0-9]*_[a-z_]+\b/g) ?? []) {
     assert.ok(

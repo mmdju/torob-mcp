@@ -2,10 +2,21 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
-## unreleased
+## 0.4.0 - 2026-10-01
+
+Five tools a shopper asks for and the service could not answer: what this product used to cost, whether the shop behind an offer is any good, which shops sell it in person, what the picture the user sent is, and what people are searching right now. The rest of Torob's product page - spec tables, variant tabs, the full price window - now travels with the details call that already paid for it.
 
 ### Added
 
+- **`price_history`** answers "is now a good time to buy?". It returns Torob's own price chart for one product: monthly points going back years, each series with Torob's label (the average price and the lowest price it has charted), the lowest and highest figure in the window, when Torob last changed this product's prices, and - with `include_changes` - the newest price moves across its shops. Measured on a live product: 54 monthly points from شهریور ۱۴۰۱, lowest 689,999 Toman against an average of 1,243,456.
+- **`shop_profile`** is the "is this seller any good?" call: the shop's trust seal (enamad) level and validity, its score and percentile, how long it has been active, Torob's own notes about it - including any violation note, sent as Torob words it - plus city, address, website, payment and delivery options, support hours and logo. `shop_id` comes from any offer in `product_details`. With `include_products` it also lists that shop's own catalogue (measured: 412 products for one seller), cheapest first.
+- **`find_shops`** searches Torob's shop directory rather than its products: by name, by city id, and narrowed to online or in-person sellers, each row carrying the id `shop_profile` needs. Deliberately separate from `search_products`: "موبایل" there means 11,124 businesses with that word in their name, not products.
+- **`search_by_image`** takes a public image URL and returns the products Torob matches to it, as cards. Torob fetches the picture itself, so there is no upload here - and when it recognises the image as one specific product, `matched_product` names it. An empty result says so honestly: it is not proof the product does not exist.
+- **`torob_trends`** returns the wordings Torob's shoppers are searching right now, each with one sample product carrying its `prk` and `details_url`. It is a separate surface from `special_offers`, which stays the merchandising feed.
+- **`product_details` reports the shops that sell the product in person** (`in_person_sellers`, `in_person_count`, `in_person_map_url`): name, city, address, the shop's own price, whether it is open now, and how long ago that price last moved. It rides along in the same response the call already fetched, so it costs no extra upstream request - and because a shelf price can be months old (measured: "۸ ماه و ۹ روز پیش"), every row carries `last_price_change_date` instead of presenting itself as today's price.
+- **`product_details` also reports what the product page shows**: the spec tables (`specs`, with Torob's group headers and its `title` group markers dropped), the variant tabs (`variants`), the category path, `price_range_toman` (Torob's own cheapest and dearest, before the seller list is sliced) and `purchase_options` - Torob's quick filters such as the guarantee and TorobPay offers, with the price each starts at and how many sellers are behind it.
+- **`search_products` reports `price_bounds_toman`** - the price group's own floor and ceiling for the result set Torob answered with (measured: 47,985 to 444,480,000 on "هدفون") - and `brand_values`, the brand slugs `brand` accepts, but only when the search offers more brands than the preview group shows.
+- **`list_locations` reports `popular_cities`** (تهران، مشهد، اصفهان، تبریز، شیراز) alongside the provinces, so a city id does not have to be guessed.
 - **The worker now serves a real site.** `GET /` is a Persian, RTL landing page (dark theme, QR hand-off, live status and version) and `GET /mcp` is the page a browser gets instead of a JSON error: the address to paste, the three steps, and a copy button. Both are generated from `landing/*.html` by `scripts/gen-landing.mjs`, so the page has one owner and the two transports cannot drift apart.
 - The Doran text face ships inside the worker as `/doran-<weight>.woff2`, so the page looks the same on a machine with no Persian font installed.
 

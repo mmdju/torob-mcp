@@ -2,7 +2,7 @@
 
 ![Torob MCP banner](assets/torob-mcp.png)
 
-A public MCP server that gives AI agents **real Torob knowledge**: search **Iran's price-comparison engine**, **prices in Toman**, **every seller's offer on one product**, shop grades and cities, delivery options, Torob's own filters, category tree, provinces and cities, and the deals it is featuring right now. **Read-only, no key needed. No login, ever.**
+A public MCP server that gives AI agents **real Torob knowledge**: search **Iran's price-comparison engine**, **prices in Toman**, **every seller's offer on one product**, **price history and trends**, **shop profiles**, in-person sellers, shop grades and cities, delivery options, Torob's own filters, category tree, provinces and cities, and the deals it is featuring right now. **Read-only, no key needed. No login, ever.**
 
 **Live endpoint:** `https://torob-mcp.mmdju3.workers.dev/mcp` (Streamable HTTP, stateless) - opening the bare address in a browser shows [the site](https://torob-mcp.mmdju3.workers.dev/), and `GET /mcp` gets the connect page instead of a JSON error.
 
@@ -24,18 +24,23 @@ Then just talk: **"ارزون‌ترین آیفون ۱۳ کجاست؟"**, **"ه�
 
 Agents running in a browser work too - the endpoint answers CORS preflights (`OPTIONS /mcp`).
 
-## 9 tools
+## 14 tools
 
 | Tool | What it answers |
 |---|---|
 | `torob_suggest` | Vague wording to **the search terms Torob itself suggests** |
 | `search_products` | "Show me X", price checks - **filters, sorting, paging, price window**, plus every filter that search accepts |
-| `product_details` | One product plus **every seller's offer**, cheapest first: shop, city, grade, delivery |
+| `product_details` | One product plus **every seller's offer** - online and **in person** - with the spec tables and the full price window |
+| `price_history` | "Is now a good time to buy?" - Torob's **own price chart**, month by month, and when it last moved |
 | `similar_products` | "That one is too expensive, what else?" |
 | `compare_products` | "Which of these?" - **only what actually differs**, plus the price spread |
 | `find_best_value` | "Best X under Y Toman" - **ranked by what your budget actually reaches** |
+| `shop_profile` | "Is this seller any good?" - **Torob's own notes**, seal, score, delivery terms, and the shop's catalogue |
+| `find_shops` | Find a **shop** by name or city, when the user names a store rather than a product |
+| `search_by_image` | "What is this?" - products matched to a **picture link**, no upload |
+| `torob_trends` | **What shoppers are searching right now**, each with a sample product |
 | `browse_categories` | Walk Torob's **category tree**, with each category's product count |
-| `list_locations` | **Province and city ids**, for delivery filtering |
+| `list_locations` | **Province and city ids**, plus the cities shoppers pick most |
 | `special_offers` | **Today's featured deals**, kept separate from any product's seller list |
 
 Every tool is read-only (`readOnlyHint: true`) and needs no credentials. Nothing here can order, message or contact a shop.
@@ -43,7 +48,8 @@ Every tool is read-only (`readOnlyHint: true`) and needs no credentials. Nothing
 Notes for agent builders:
 
 - **All prices are in Toman** (1 Toman = 10 Rial). Prices, stock and shop grades **move constantly** - always link the product URL so the user can confirm before buying.
-- **A search card is one price - the cheapest offer.** `product_details` is the call that lists every seller, and the `price_spread_toman` between them is the whole reason a price-comparison source exists.
+- **A search card is one price - the cheapest offer.** `product_details` is the call that lists every seller, and the `price_spread_toman` between them is the whole reason a price-comparison source exists. It also returns the shops that sell the product **in person** (`in_person_sellers`), with each shelf price's `last_price_change_date` - a shop price can be months old, so say how old it is.
+- **`price_history` is the honesty check on a price.** Compare today's cheapest offer with what Torob charts for the product; the series labels are Torob's own, so quote them rather than inventing a trend.
 - **`price_toman: null` means not available** - out of stock upstream, or no price at all. It is never 0, and **0 is never free**: Torob's own "not for sale" comes back as `available: false`.
 - **`price_unreliable: true` is Torob saying that price cannot be trusted.** Pass the warning on; do not present it as a bargain.
 - **A shop grade needs its vote count.** Torob sends a score for nearly every offer but almost never the votes behind it, so `shop_score: 5` with `shop_votes: 0` is normal and means "no votes yet", not "five-star shop".
@@ -51,7 +57,7 @@ Notes for agent builders:
 - **An unknown filter slug or value is refused with the real ones.** `available_filters` carries each group's accepted values (`options`, plus `values_url` for the full brand list); Torob ignores a slug or value it does not know and answers **unfiltered**, so a typo used to hand back a full unfiltered list that read as a filtered answer.
 - **Torob answers a client that calls too fast with a bot challenge instead of data.** The server reports it plainly, never solves or evades it, and holds the rest of a burst for five minutes rather than retrying into a longer block. Details in [SECURITY.md](SECURITY.md).
 - Results are **capped** (default 10, max 30) to protect agent context. Persian wording is folded (Arabic yeh/kaf, Persian and Arabic-Indic digits, ZWNJ kept) when cache keys and product names are compared - the query itself reaches Torob exactly as typed, and Torob folds it the same way.
-- **[examples/sample-calls.md](examples/sample-calls.md)** has six copy-paste flows, and **[docs/tools.md](docs/tools.md)** has every parameter and filter slug.
+- **[examples/sample-calls.md](examples/sample-calls.md)** has twelve copy-paste flows, and **[docs/tools.md](docs/tools.md)** has every parameter and filter slug. Response types live in **[docs/card.d.ts](docs/card.d.ts)**.
 
 ## How it works
 
@@ -76,7 +82,7 @@ flowchart LR
 What this means:
 
 - **Stateless.** Every request stands alone - no sessions, no accounts, nothing to log in to.
-- **Read-only.** All 9 tools carry `readOnlyHint`. Nothing here can change, delete or order anything, and no shop is ever contacted.
+- **Read-only.** All 14 tools carry `readOnlyHint`. Nothing here can change, delete or order anything, and no shop is ever contacted.
 - **Projected, not passed through.** A Torob search page is roughly 70KB of ranking metadata and experiment plumbing. Every tool returns a compact record built by the server's projection layer instead, with the seller list as a first-class `offers[]` array rather than a flattened string.
 - **No user data.** Nothing about you is stored. What the server does keep: a short-lived response cache and a small map of product ids it handed out, so an id can be resolved back to its seller list.
 - **Rate-aware by necessity.** Torob does not throttle with a 429 - it answers a client that calls too fast with a **bot challenge**. Upstream calls are serialized with a 1.5s gap, and a challenge opens a circuit breaker instead of a retry storm.
