@@ -63,7 +63,17 @@ landing.includes("torob-mcp") ? ok("landing page") : bad("landing page");
 const og = await fetch(`${BASE}/og.png`).then((r) => r.arrayBuffer()).catch(() => null);
 og && new Uint8Array(og).length > 100 ? ok("og image") : bad("og image");
 
-// 5. MCP handshake
+// 5. the hosted copy limits /mcp, and says so in headers. A self-hosted run has
+// no limit, so this is about the deployment rather than about the tools.
+const budget = await fetch(MCP, {
+  method: "POST",
+  headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+  body: JSON.stringify({ jsonrpc: "2.0", id: 0, method: "tools/list", params: {} }),
+});
+const limit = budget.headers.get("x-ratelimit-limit");
+limit ? ok("rate limit", `${limit} /mcp calls a minute per client`) : bad("rate limit", "x-ratelimit-limit missing");
+
+// 6. MCP handshake
 const init = await rpc("initialize", {
   protocolVersion: "2025-06-18",
   capabilities: {},
@@ -71,7 +81,7 @@ const init = await rpc("initialize", {
 }, 1);
 init.result?.serverInfo?.name === "torob-mcp" ? ok("initialize", init.result.serverInfo.version) : bad("initialize");
 
-// 6. tools
+// 7. tools
 const tools = (await rpc("tools/list", {}, 2)).result.tools.map((t) => t.name).sort();
 const expected = [
   "browse_categories",
@@ -91,7 +101,7 @@ const expected = [
 ];
 JSON.stringify(tools) === JSON.stringify(expected) ? ok("tools/list", `${tools.length} tools`) : bad("tools/list", tools.join(", "));
 
-// 7. the tools answer against the live API
+// 8. the tools answer against the live API
 // Torob does not throttle with a 429 - it challenges a client that calls too
 // often, and the block then covers every endpoint for about five idle
 // minutes. Measured, a full sweep is walled partway through at any gap short
@@ -197,12 +207,20 @@ try {
     chart?.reading ? ok("price reading", "a plain-language sentence travels with the chart") : bad("price reading", "reading missing");
     await pause();
 
-    const similar = await call("similar_products", { prk: first.prk, limit: 3 }, id++);
+    // The details_url has to come back with the prk: Torob cannot look up a
+    // product by id alone, and this server's own memory of a product is per
+    // isolate and per colo, so an id-only call here would fail on a cold one
+    // rather than test the contract.
+    const similar = await call("similar_products", { prk: first.prk, details_url: first.details_url, limit: 3 }, id++);
     similar.found !== undefined ? ok("similar_products", `${similar.found} similar`) : bad("similar_products");
     await pause();
 
     if (search.products.length > 1) {
-      const cmp = await call("compare_products", { prks: search.products.slice(0, 2).map((p) => p.prk) }, id++);
+      const cmp = await call(
+        "compare_products",
+        { prks: search.products.slice(0, 2).map((p) => ({ prk: p.prk, details_url: p.details_url })) },
+        id++
+      );
       // A comparison that resolved nothing is not a pass - the ids came from
       // a search this same run handed out, so they are expected to resolve.
       cmp.compared === cmp.requested
