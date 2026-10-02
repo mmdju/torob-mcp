@@ -376,3 +376,45 @@ test("torob_suggest returns the wordings Torob itself suggests", async () => {
   assert.deepEqual(out.suggestions, ["قاب گوشی ایفون", "گلس ایفون"]);
   assert.match(out.next, /search_products/);
 });
+
+// The search cache key used to leave out `brand` and `city`, so a second search
+// with the same words and a different brand or city came back from the cache
+// as if the filter had never changed - an unfiltered or wrongly filtered list
+// that read as the answer. Each query below is unique to its test so no other
+// test's cached search can satisfy it.
+test("a different brand is a different search, not a cache hit", async () => {
+  const seen = [];
+  stub((url) => {
+    seen.push(url);
+    return searchPayload;
+  });
+  await run("search_products", { query: "کلید-برند-یک", brand: "apple" });
+  await run("search_products", { query: "کلید-برند-یک", brand: "samsung" });
+  assert.equal(seen.length, 2, "the second brand must reach upstream");
+  assert.match(seen[0], /brand=apple/);
+  assert.match(seen[1], /brand=samsung/);
+});
+
+test("a different city is a different search, not a cache hit", async () => {
+  const seen = [];
+  stub((url) => {
+    seen.push(url);
+    return searchPayload;
+  });
+  await run("search_products", { query: "کلید-شهر-یک", city: "1" });
+  await run("search_products", { query: "کلید-شهر-یک", city: "2" });
+  assert.equal(seen.length, 2, "the second city must reach upstream");
+  assert.match(seen[0], /city=1(&|$)/);
+  assert.match(seen[1], /city=2(&|$)/);
+});
+
+test("the same brand and city still share one cache entry", async () => {
+  let calls = 0;
+  stub(() => {
+    calls += 1;
+    return searchPayload;
+  });
+  await run("search_products", { query: "کلید-یکسان", brand: "apple", city: "1" });
+  await run("search_products", { query: "کلید-یکسان", brand: "apple", city: "1" });
+  assert.equal(calls, 1);
+});

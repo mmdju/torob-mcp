@@ -663,10 +663,21 @@ export function priceWindowOf(raw: RawProduct): { min: number | null; max: numbe
 
 // ----------------------------------------------------------------- endpoints
 
-function searchKey(q: string, page: number, sort: string, category: string, shopType: string, filters: string): string {
+function searchKey(
+  q: string,
+  page: number,
+  sort: string,
+  category: string,
+  shopType: string,
+  filters: string,
+  brand: string,
+  city: string
+): string {
   // Folded so two spellings of one query share one cache entry and one upstream
-  // call ("آيفون" / "آیفون").
-  return `s:${foldKey(q)}|${page}|${sort}|${category}|${shopType}|${filters}`;
+  // call ("آيفون" / "آیفون"). Every input that changes the upstream URL belongs
+  // in the key: brand and city used to be left out, so a second search with the
+  // same words and a different brand or city was answered from the first one.
+  return `s:${foldKey(q)}|${page}|${sort}|${category}|${shopType}|${filters}|${brand}|${city}`;
 }
 
 export interface SearchOptions {
@@ -906,7 +917,16 @@ export async function searchProducts(opts: SearchOptions): Promise<SearchResult>
 // details path can reuse a search it already paid for instead of asking again.
 async function searchRaw(opts: SearchOptions): Promise<RawSearch> {
   const filters = opts.filters ?? {};
-  const key = searchKey(opts.q, opts.page, opts.sort, opts.category ?? "", opts.shopType ?? "", JSON.stringify(filters));
+  const key = searchKey(
+    opts.q,
+    opts.page,
+    opts.sort,
+    opts.category ?? "",
+    opts.shopType ?? "",
+    JSON.stringify(filters),
+    opts.brand ?? "",
+    opts.city ?? ""
+  );
   return cached(key, TTL.search, () => {
     const params = new URLSearchParams({
       q: opts.q,
