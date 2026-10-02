@@ -20,6 +20,7 @@ import {
   type LookupBudget,
   type PriceChart,
   type ProductCard,
+  canonicalSlug,
   categoryChildren,
   cities,
   filterKeyMap,
@@ -201,8 +202,9 @@ const searchTool: ToolDef = {
       brand: {
         type: "string",
         description:
-          "Brand slug from the brand group of available_filters (options[].value, or its values_url list), " +
-          "e.g. 'apple-اپل'. A display name like 'apple' is not a slug and Torob ignores it.",
+          "Brand id from the brand group of available_filters (options[].value) or brand_values[].value, " +
+          "e.g. '17418' for MikroTik. Torob filters on the id and ignores a slug or display name; one this " +
+          "query's earlier search showed is mapped onto its id.",
       },
       city: { type: "string", description: "Filter by delivery city id, e.g. from list_locations." },
       shop_type: { type: "string", enum: [...SHOP_TYPES], description: "offline = shops with a branch, online = online sellers." },
@@ -262,14 +264,18 @@ const searchTool: ToolDef = {
     }
     Object.assign(applied, checked ?? wanted);
 
-    // A brand filter wants the slug Torob uses, not the name people say
-    // (measured: brand=apple changed nothing, brand=apple-اپل narrowed the
-    // list). Map a name through the brand group when this query showed one.
+    // A brand filter wants the brand's id, not its slug or the name people say
+    // (measured: brand=17418 narrowed routers to MikroTik, brand=mikrotik-میکروتیک
+    // changed nothing). Map a name or slug through the brand group when this
+    // query showed one; anything else goes upstream as given.
     let brand = str(args.brand).trim() || undefined;
     if (brand) {
       const groups = await rememberedFilterGroups(filterMemoryKey(query, { category, city, shopType }));
       const brandGroup = groups?.find((g) => g.type === "brand");
-      const matched = brandGroup?.options?.find((o) => o.value === brand || foldKey(o.name) === foldKey(brand));
+      const slug = canonicalSlug(brand);
+      const matched = brandGroup?.options?.find(
+        (o) => o.value === brand || o.slug === slug || foldKey(o.name) === foldKey(brand)
+      );
       if (matched) brand = matched.value;
     }
 
@@ -307,12 +313,12 @@ const searchTool: ToolDef = {
       products: found.products.slice(0, limit),
       available_filters: found.available_filters,
       // The brand group above is a preview; when the search offers more brands
-      // than it shows, the full list (with the slugs `brand` needs) travels here.
+      // than it shows, the full list (with the ids `brand` needs) travels here.
       ...(found.brand_values.length > OPTION_PREVIEW || found.brand_values_truncated
         ? {
             brand_values: found.brand_values,
             brand_values_note:
-              "The brand group in available_filters is a preview; these are the slugs `brand` accepts. " +
+              "The brand group in available_filters is a preview; pass a brand's value (its id) as `brand`. " +
               (found.brand_values_truncated ? "There are more than shown - the group's values_url lists the rest." : ""),
           }
         : {}),

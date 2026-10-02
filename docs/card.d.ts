@@ -142,8 +142,12 @@ export interface FilterGroup {
   type: string;
   /** How many values the group has. */
   values: number;
-  /** The values to pass back; absent when the group takes none (a range). */
-  options?: { name: string; value: string }[];
+  /**
+   * The values to pass back; absent when the group takes none (a range). A
+   * brand option's value is the brand id `brand` takes, and its slug is only
+   * there to recognise it by.
+   */
+  options?: { name: string; value: string; slug?: string }[];
   /** True when `options` is a preview rather than the whole list. */
   options_truncated?: boolean;
   /** For grouped filters like brand, the endpoint that lists every value. */
@@ -169,7 +173,8 @@ export interface SearchResponse {
   /** The filter groups this search really accepts - 30 on a typical query. */
   available_filters: FilterGroup[];
   /** Present only when the search offers more brands than the preview shows. */
-  brand_values?: { name: string; slug: string }[];
+  /** `value` is the brand id `brand` takes; `slug` is for recognising it. */
+  brand_values?: { name: string; value: string; slug: string }[];
   brand_values_note?: string;
   attribution: string;
   /** Present when nothing matched: an empty result is not proof of absence. */

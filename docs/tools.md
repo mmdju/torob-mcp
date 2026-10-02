@@ -55,7 +55,7 @@ Search Torob, get **compact cards**: the cheapest offer in Toman, the shop behin
 | `page` | number | 1-based, max 50 |
 | `sort` | string | `popularity` (default, most relevant) · `price` (cheapest first) · `expensive` (dearest first) · `newest` (newest first) · `sellers` (most sellers) |
 | `category` | string | Torob category id, from `suggested_categories` or `browse_categories` |
-| `brand` | string | Brand **slug** from the brand group of `available_filters` (`options[].value`, `brand_values`, or the full list at its `values_url`), e.g. `apple-اپل`. A display name is mapped onto the slug when this search showed the brand group |
+| `brand` | string | Brand **id** from the brand group of `available_filters` (`options[].value`, `brand_values[].value`, or the `id` of an entry in the full list at its `values_url`), e.g. `17418` for MikroTik. Torob filters on the id and ignores a slug or display name; either is mapped onto the id when this search showed the brand group |
 | `city` | string | Delivery-city id, from `list_locations` |
 | `shop_type` | string | `offline` (products that have an in-person seller) · `online` (online sellers) |
 | `min_price_toman` | number | Only products at or above this price |
@@ -84,7 +84,7 @@ A value from `options` is passed back as its `value`, not its display `name` - t
 Two things the filter groups cannot say in full:
 
 - `price_bounds_toman` - the price group's own floor and ceiling **for the result set** (`{min, max}`), which is the range Torob's own slider spans (measured: 47,985 to 444,480,000 on "هدفون"). `price_range_toman` is Torob's looser min/max on the response; when the two disagree, the bounds are the tighter, real one.
-- `brand_values` - the brands this search offers, as `{name, slug}` with the slug `brand` accepts. It appears only when the search offers **more brands than the preview group shows** (10), because below that they are already in `available_filters`; `brand_values_note` says so, and the note adds that the group's `values_url` has the rest if even this list is short.
+- `brand_values` - the brands this search offers, as `{name, value, slug}`: `value` is the brand id `brand` accepts, `slug` is there to recognise the brand by (measured: `brand=17418` narrowed routers to MikroTik, while its slug `mikrotik-میکروتیک` came back unfiltered). It appears only when the search offers **more brands than the preview group shows** (10), because below that they are already in `available_filters`; `brand_values_note` says so, and the note adds that the group's `values_url` has the rest if even this list is short.
 
 Honest-failure fields, present only when relevant:
 

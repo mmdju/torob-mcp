@@ -95,7 +95,9 @@ test("search_products reports the filter groups the search really accepts", asyn
   assert.equal(brand.values, 2);
   assert.match(brand.values_url, /brand\/list/);
   assert.equal(brand.options[0].name, "سامسونگ");
-  assert.equal(brand.options[0].value, "samsung");
+  // Torob filters on the brand id; the slug is only there to recognise it by.
+  assert.equal(brand.options[0].value, "5");
+  assert.equal(brand.options[0].slug, "samsung");
   // A brand list is a preview - the value is passed through unchecked.
   assert.equal(brand.options_truncated, true);
   // A price group is a range, not choices: it has no options to pass back.
@@ -296,4 +298,109 @@ test("a wrong field name is a failure, not an empty answer", async () => {
   const out = await run("list_locations", { search: "ناموجود" });
   assert.deepEqual(out.cities, []);
   assert.equal(out.count, 0);
+});
+
+// ------------------------------------------------------------------ brand
+
+// Torob filters a search on the brand's numeric id, not on its slug. Measured
+// on 2026-10-02 against the router category (1248): `brand=17418` returned 26
+// of 26 MikroTik rows, while `brand=mikrotik-میکروتیک` - the slug, encoded once
+// - came back unfiltered (10 of 26), exactly as an unknown brand does. The
+// site's own brand chip sends `brand=17418&brand_name=<slug>`. The brand items
+// arrive as {id, slug, name1, name2} with the slug already percent-encoded.
+const MIKROTIK_SLUG = "mikrotik-%D9%85%DB%8C%DA%A9%D8%B1%D9%88%D8%AA%DB%8C%DA%A9";
+const routerPayload = {
+  ...searchPayload,
+  categories: [{ id: "1248", title: "روتر" }],
+  attributes: [
+    {
+      title: "انتخاب برند",
+      slug: "brand",
+      type: "brand",
+      items: [
+        { id: 17418, slug: MIKROTIK_SLUG, name1: "میکروتیک", name2: "Mikrotik" },
+        { id: 32, slug: "tp-link-%D8%AA%DB%8C-%D9%BE%DB%8C-%D9%84%DB%8C%D9%86%DA%A9", name1: "تی پی-لینک", name2: "TP-Link" },
+      ],
+      url: "https://api.torob.com/v4/brand/list/?cat_list=1248",
+    },
+  ],
+};
+const brandSent = (url) => new URL(url).searchParams.get("brand");
+
+test("the brand value a search advertises is the id Torob filters on", async () => {
+  const seen = [];
+  stub((url) => {
+    seen.push(url);
+    return routerPayload;
+  });
+  const first = await run("search_products", { query: "روتر برند-شناسه", category: "1248" });
+  const option = first.available_filters.find((f) => f.slug === "brand").options[0];
+  assert.equal(option.name, "میکروتیک");
+  assert.equal(option.value, "17418");
+  // Readable, not percent-encoded: it is there to recognise, not to send.
+  assert.equal(option.slug, "mikrotik-میکروتیک");
+  await run("search_products", { query: "روتر برند-شناسه", category: "1248", brand: option.value });
+  assert.equal(brandSent(seen.at(-1)), "17418");
+});
+
+test("a brand slug from an earlier answer is sent as the brand id", async () => {
+  // Older answers advertised the slug, encoded as Torob sent it. A caller that
+  // still passes it, in either spelling, must not get an unfiltered list.
+  const seen = [];
+  stub((url) => {
+    seen.push(url);
+    return routerPayload;
+  });
+  await run("search_products", { query: "روتر برند-اسلاگ", category: "1248" });
+  await run("search_products", { query: "روتر برند-اسلاگ", category: "1248", brand: MIKROTIK_SLUG });
+  assert.equal(brandSent(seen.at(-1)), "17418");
+  await run("search_products", { query: "روتر برند-اسلاگ", category: "1248", brand: "mikrotik-میکروتیک" });
+  assert.equal(brandSent(seen.at(-1)), "17418");
+});
+
+test("a brand name is sent as the brand id", async () => {
+  const seen = [];
+  stub((url) => {
+    seen.push(url);
+    return routerPayload;
+  });
+  await run("search_products", { query: "روتر برند-نام", category: "1248" });
+  await run("search_products", { query: "روتر برند-نام", category: "1248", brand: "میکروتیک" });
+  assert.equal(brandSent(seen.at(-1)), "17418");
+});
+
+test("brand_values carry the id that brand takes", async () => {
+  const items = Array.from({ length: 12 }, (_, i) => ({
+    id: 100 + i,
+    slug: `brand-${i}-%D8%A8%D8%B1%D9%86%D8%AF`,
+    name1: `برند ${i}`,
+  }));
+  stub(() => ({ ...routerPayload, attributes: [{ title: "انتخاب برند", slug: "brand", type: "brand", items }] }));
+  const out = await run("search_products", { query: "روتر برند-فهرست" });
+  assert.equal(out.brand_values.length, 12);
+  assert.deepEqual(out.brand_values[0], { name: "برند 0", value: "100", slug: "brand-0-برند" });
+  assert.match(out.brand_values_note, /value/);
+});
+
+test("a brand id is sent unchanged, even with no earlier search", async () => {
+  const seen = [];
+  stub((url) => {
+    seen.push(url);
+    return routerPayload;
+  });
+  await run("search_products", { query: "روتر برند-سرد", brand: "17418" });
+  assert.equal(seen.length, 1);
+  assert.equal(brandSent(seen[0]), "17418");
+});
+
+test("an unknown brand value is still passed through unchecked", async () => {
+  // The brand group is a preview, so a value outside it may be real.
+  const seen = [];
+  stub((url) => {
+    seen.push(url);
+    return routerPayload;
+  });
+  await run("search_products", { query: "روتر برند-ناشناس", category: "1248" });
+  await run("search_products", { query: "روتر برند-ناشناس", category: "1248", brand: "99999" });
+  assert.equal(brandSent(seen.at(-1)), "99999");
 });
