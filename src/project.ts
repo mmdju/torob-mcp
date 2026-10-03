@@ -663,10 +663,21 @@ export function priceWindowOf(raw: RawProduct): { min: number | null; max: numbe
 
 // ----------------------------------------------------------------- endpoints
 
-function searchKey(q: string, page: number, sort: string, category: string, shopType: string, filters: string): string {
+function searchKey(
+  q: string,
+  page: number,
+  sort: string,
+  category: string,
+  shopType: string,
+  filters: string,
+  brand: string,
+  city: string
+): string {
   // Folded so two spellings of one query share one cache entry and one upstream
-  // call ("آيفون" / "آیفون").
-  return `s:${foldKey(q)}|${page}|${sort}|${category}|${shopType}|${filters}`;
+  // call ("آيفون" / "آیفون"). Every input that changes the upstream URL belongs
+  // in the key: brand and city used to be left out, so a second search with the
+  // same words and a different brand or city was answered from the first one.
+  return `s:${foldKey(q)}|${page}|${sort}|${category}|${shopType}|${filters}|${brand}|${city}`;
 }
 
 export interface SearchOptions {
@@ -697,11 +708,12 @@ export interface SearchResult {
    */
   price_bounds_toman: { min: number | null; max: number | null } | null;
   /**
-   * Every brand this search offers, with the slug a `brand` filter needs. The
-   * brand group in available_filters is only a preview, so this is the list to
-   * read when the wanted brand is not in it.
+   * Every brand this search offers, with the value (the brand id) a `brand`
+   * filter needs and the slug to recognise it by. The brand group in
+   * available_filters is only a preview, so this is the list to read when the
+   * wanted brand is not in it.
    */
-  brand_values: { name: string; slug: string }[];
+  brand_values: { name: string; value: string; slug: string }[];
   brand_values_truncated?: true;
   /** Categories Torob suggested for this wording, so an agent can narrow down. */
   suggested_categories: { id: string; title: string }[];
@@ -725,8 +737,10 @@ function categoriesOf(raw: unknown): { id: string; title: string }[] {
 export interface FilterOption {
   /** The label the search UI shows. */
   name: string;
-  /** The value to pass back in `filters` for this option. */
+  /** The value to pass back in `filters` (or, for a brand, in `brand`). */
   value: string;
+  /** A brand's readable slug, for recognising it; Torob filters on `value`. */
+  slug?: string;
 }
 
 export interface FilterGroup {
@@ -753,9 +767,27 @@ export const OPTION_PREVIEW = 10;
 const OPTION_CAP = 60;
 
 function optionValueOf(item: unknown): string {
-  // A brand item carries the slug a filter needs; a choice item carries value.
   if (item && typeof item === "object" && "value" in (item as object)) return str((item as any).value);
   return str((item as any)?.slug);
+}
+
+// Torob filters a search on a brand's numeric id and ignores its slug, the same
+// way it ignores an unknown brand (measured 2026-10-02 on routers, category
+// 1248: brand=17418 returned 26 of 26 MikroTik rows, brand=mikrotik-میکروتیک
+// came back unfiltered). Brand items arrive as {id, slug, name1, name2} with the
+// slug already percent-encoded, so the slug is decoded once, here, and kept only
+// to recognise the brand by.
+export function canonicalSlug(slug: string): string {
+  try {
+    return decodeURIComponent(slug.trim());
+  } catch {
+    return slug.trim();
+  }
+}
+
+function brandOf(item: unknown): { value: string; slug: string } {
+  const slug = canonicalSlug(str((item as any)?.slug));
+  return { value: str((item as any)?.id).trim() || slug, slug };
 }
 
 function filterGroupsOf(raw: RawSearch): FilterGroup[] {
@@ -768,10 +800,11 @@ function filterGroupsOf(raw: RawSearch): FilterGroup[] {
     const options: FilterOption[] = [];
     if (type !== "price") {
       for (const item of items) {
-        const value = optionValueOf(item);
+        const brand = type === "brand" ? brandOf(item) : null;
+        const value = brand ? brand.value : optionValueOf(item);
         const name =
           short((item as any)?.name ?? (item as any)?.name1 ?? (item as any)?.title ?? (item as any)?.name2, 80) ?? value;
-        if (name || value) options.push({ name, value });
+        if (name || value) options.push({ name, value, ...(brand?.slug ? { slug: brand.slug } : {}) });
         if (options.length >= OPTION_CAP) break;
       }
     }
@@ -841,19 +874,19 @@ export function priceBoundsOf(raw: RawSearch): { min: number | null; max: number
 // preview (OPTION_PREVIEW entries) whose full list lives behind values_url.
 const BRAND_VALUE_CAP = 30;
 
-export function brandValuesOf(raw: RawSearch): { values: { name: string; slug: string }[]; truncated: boolean } {
+export function brandValuesOf(raw: RawSearch): { values: { name: string; value: string; slug: string }[]; truncated: boolean } {
   const groups = Array.isArray(raw.attributes) ? raw.attributes : [];
-  const values: { name: string; slug: string }[] = [];
+  const values: { name: string; value: string; slug: string }[] = [];
   let total = 0;
   for (const group of groups) {
     if (str((group as any)?.type).trim() !== "brand") continue;
     const items = Array.isArray((group as any)?.items) ? (group as any).items : [];
     for (const item of items) {
-      const slug = str((item as any)?.slug).trim();
+      const { value, slug } = brandOf(item);
       const name = short((item as any)?.name1 ?? (item as any)?.name2, 80);
-      if (!slug || !name) continue;
+      if (!value || !name) continue;
       total += 1;
-      if (values.length < BRAND_VALUE_CAP) values.push({ name, slug });
+      if (values.length < BRAND_VALUE_CAP) values.push({ name, value, slug });
     }
     break;
   }
@@ -906,7 +939,16 @@ export async function searchProducts(opts: SearchOptions): Promise<SearchResult>
 // details path can reuse a search it already paid for instead of asking again.
 async function searchRaw(opts: SearchOptions): Promise<RawSearch> {
   const filters = opts.filters ?? {};
-  const key = searchKey(opts.q, opts.page, opts.sort, opts.category ?? "", opts.shopType ?? "", JSON.stringify(filters));
+  const key = searchKey(
+    opts.q,
+    opts.page,
+    opts.sort,
+    opts.category ?? "",
+    opts.shopType ?? "",
+    JSON.stringify(filters),
+    opts.brand ?? "",
+    opts.city ?? ""
+  );
   return cached(key, TTL.search, () => {
     const params = new URLSearchParams({
       q: opts.q,
