@@ -2,6 +2,13 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
+## Unreleased
+
+### Fixed
+
+- **`brand` sends the brand id Torob filters on, not its slug.** Torob ignores a slug or display name and answers unfiltered, so a filtered search used to come back as a full list that read as the answer. `available_filters` and `brand_values` now carry the id as `value` with the slug beside it to recognise the brand by, and a name or slug from an earlier answer is mapped onto the id.
+- **A different brand or city is a different search.** The response cache left both out of its key, so a repeat search with the same words and a different brand or city came back from the first search's cache.
+
 ## 0.4.0 - 2026-10-01
 
 Five tools a shopper asks for and the service could not answer: what this product used to cost, whether the shop behind an offer is any good, which shops sell it in person, what the picture the user sent is, and what people are searching right now. The rest of Torob's product page - spec tables, variant tabs, the full price window - now travels with the details call that already paid for it.
