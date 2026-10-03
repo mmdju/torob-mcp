@@ -23,7 +23,7 @@ This server treats a challenge as a cooldown, not a failure to retry:
 
 The hosted copy at `torob-mcp.mmdju3.workers.dev` answers at most **20 `POST /mcp` calls a minute per client IP**. Over the limit it returns **HTTP 429** with a JSON-RPC error body, a `retry-after` header and `x-ratelimit-limit` / `x-ratelimit-remaining`, so a client can see where it stands instead of guessing.
 
-Twenty a minute is far above a real conversation: a whole sweep of the tools, one call at a time with a pause between, is about four. It is low enough that a script cannot use this service as an unmetered price API. The count is kept in the per-colo cache, which makes it a **deterrent rather than a meter** - a burst spread across colos is counted once per colo - and only `/mcp` is limited: the landing page, the connect page, the fonts and `/health` keep answering, so a browser is never locked out of the page that explains the limit.
+Twenty a minute is far above a real conversation: a whole sweep of the tools, one call at a time with a pause between, is about four. It is low enough that a script cannot use this service as an unmetered price API. The count is kept in a **Durable Object**, one per client IP, so it is exact and the same in every colo instead of being tracked separately by each - a weaker per-colo cache only stands in if that binding is ever missing, which can never fail the request it protects. Only `/mcp` is limited: the landing page, the connect page, the fonts and `/health` keep answering, so a browser is never locked out of the page that explains the limit.
 
 **A self-hosted run has no limit.** The limiter lives in `src/rate-limit.ts` and is imported by `src/worker.ts` alone; the server core and the Node entry point do not know it exists.
 
