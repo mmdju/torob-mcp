@@ -183,6 +183,9 @@
   body.dark .qr-card button { color: #f5f5f7; background: rgba(28,28,32,.6); border-color: rgba(255,255,255,.12); }
   .btns .go-wrap { position: relative; display: inline-flex; }
   .btns .go-wrap .go { flex: 1; }
+  .btns .go-wrap .stars { position: absolute; top: -10px; inset-inline-start: -6px; font-size: 11px; font-weight: 700; color: #1c2128; font-family: "Outfit", system-ui, sans-serif; background: #fff; border: 1px solid rgba(0,0,0,.08); box-shadow: 0 2px 8px rgba(0,0,0,.10); border-radius: 999px; padding: 0 9px; direction: ltr; line-height: 1.8; white-space: nowrap; pointer-events: none; }
+  .btns .go-wrap .stars:empty { display: none; }
+  body.dark .btns .go-wrap .stars { color: #f5f5f7; background: #1c1c20; border-color: rgba(255,255,255,.14); box-shadow: 0 2px 8px rgba(0,0,0,.4); }
   .topbar { position: fixed; top: 14px; left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: center; z-index: 5; opacity: 0; animation: rise 1s ease .8s forwards; }
   .top-actions { display: flex; gap: 8px; }
   .topbar button { font-family: inherit; font-size: 12px; font-weight: 500; color: #1c2128; background: rgba(255,255,255,.65); -webkit-backdrop-filter: blur(14px) saturate(160%); backdrop-filter: blur(14px) saturate(160%); border: 1px solid rgba(255,255,255,.9); box-shadow: 0 2px 10px rgba(0,0,0,.06); border-radius: 999px; padding: 6px 16px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: transform .15s ease, box-shadow .15s ease; }
@@ -242,21 +245,21 @@
   <h1><span style="--i:0">T</span><span style="--i:1">o</span><span style="--i:2">r</span><span style="--i:3">o</span><span style="--i:4">b</span><span style="--i:5">&nbsp;</span><span style="--i:6">M</span><span style="--i:7">C</span><span style="--i:8">P</span></h1>
   <p class="sub">پل بین ترب و دستیار هوشمند شما.</p>
   <div class="btns">
-    <span class="go-wrap"><a class="go" href="/mcp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7a5 5 0 0 0 0 10h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4a3.1 3.1 0 0 1 0 6.2h-4V17h4a5 5 0 0 0 0-10z"/></svg><span id="ghT">راهنما</span></a></span>
+    <span class="go-wrap"><a class="go" href="https://github.com/mmdju/torob-mcp"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg><span id="ghT">گیت‌هاب</span></a><span class="stars" id="stars"></span></span>
     <a class="mid" href="https://x.com/MmdjDev"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.9 1.15h3.68l-8.04 9.19L24 22.85h-7.41l-5.8-7.58-6.64 7.58H.47l8.6-9.83L0 1.15h7.59l5.24 6.93 6.07-6.93Zm-1.29 19.5h2.04L6.49 3.24H4.3l13.31 17.41Z"/></svg><span style="font-family:'Outfit','Doran',system-ui,sans-serif;font-weight:600;letter-spacing:.01em">MmdjDev</span></a>
     <a class="tg" href="https://t.me/Mmdju"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.9 4.4 2.8 11.8c-.7.3-.7 1.2.1 1.4l4.6 1.4 1.7 5.3c.2.7 1.2.9 1.8.3l2.5-2.4 4.8 3.5c.6.4 1.5.1 1.7-.7l2.4-14.5c.2-1-.8-1.9-1.5-1.7zM8.3 13l10.4-6.6c.2-.1.4.2.2.3l-8.7 7.8-.3 2.6-1.6-4.1z"/></svg><span style="font-family:'Outfit','Doran',system-ui,sans-serif;font-weight:600;letter-spacing:.01em" id="tgT">Mmdju</span></a>
     <a class="health" href="https://torob-mcp.mmdju3.workers.dev/health"><svg class="dot-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></svg><span id="healthT">سلامت سرویس</span><span class="dot wait" id="dot"></span></a>
   </div>
     <section class="statsbox">
-    <h2 id="statsH">آمار سرویس</h2>
+    <h2 id="statsH">آمار پروژه</h2>
     <div class="statsgrid">
+      <a class="stat" href="https://github.com/mmdju/torob-mcp" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg><span class="v" id="stStars">…</span><span class="k" id="stStarsK">استار</span></a>
+      <a class="stat" href="https://github.com/mmdju/torob-mcp/forks" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92c0-1.61-1.31-2.92-2.92-2.92z"/></svg><span class="v" id="stForks">…</span><span class="k" id="stForksK">فورک</span></a>
       <a class="stat" href="/mcp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.4-2.4c.4-.4.4-1 0-1.4z"/></svg><span class="v" data-count="14">14</span><span class="k" id="stToolsK">ابزار</span></a>
       <a class="stat" href="/health"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg><span class="v" id="stVersion">…</span><span class="k" id="stVersK">نسخه</span></a>
-      <a class="stat" href="/health"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></svg><span class="v" id="stStat">…</span><span class="k" id="stStatK">وضعیت</span></a>
-      <a class="stat" href="/mcp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg><span class="v" data-count="30">30</span><span class="k" id="stGroupsK">گروه فیلتر</span></a>
     </div>
   </section>
-  <p class="note"><span id="noteT">پروژه‌ای مستقل — وابسته به ترب نیست</span> · <a id="bugL" href="https://x.com/MmdjDev" target="_blank" rel="noopener">گزارش مشکل</a></p>
+  <p class="note"><span id="noteT">پروژه‌ای مستقل — وابسته به ترب نیست</span> · <a id="bugL" href="https://github.com/mmdju/torob-mcp/issues/new" target="_blank" rel="noopener">گزارش باگ</a></p>
 </main>
 <div class="qr-ov" id="qrOv">
   <div class="qr-card" role="dialog" aria-modal="true" aria-labelledby="qrH">
@@ -434,7 +437,6 @@
     var noVer = matchMedia("(pointer: coarse)").matches || innerWidth <= 520;
     document.getElementById("healthT").textContent = (enQ ? "Service is live" : "سرویس زنده است") + (!noVer && j.version ? (enQ ? " · v" : " · نسخه ") + j.version : "");
     var stVers = document.getElementById("stVersion"); if (stVers) stVers.textContent = j.version || "—";
-    var stStat = document.getElementById("stStat"); if (stStat) stStat.textContent = enQ ? "Live" : "زنده";
   document.querySelectorAll(".btns a, .topbar button").forEach(function (a) {
     a.addEventListener("click", function () {
       try { if (navigator.vibrate && !matchMedia("(prefers-reduced-motion: reduce)").matches) navigator.vibrate(10); } catch (e) {}
@@ -449,7 +451,7 @@
     try { document.execCommand("copy"); } catch (err) {}
     document.body.removeChild(i); done();
   });
-  }).catch(function () { var d = document.getElementById("dot"); d.classList.remove("wait"); d.classList.add("bad"); document.getElementById("healthT").textContent = document.documentElement.lang === "en" ? "Service unavailable" : "سرویس در دسترس نیست"; var stStat = document.getElementById("stStat"); if (stStat) stStat.textContent = "—"; });
+  }).catch(function () { var d = document.getElementById("dot"); d.classList.remove("wait"); d.classList.add("bad"); document.getElementById("healthT").textContent = document.documentElement.lang === "en" ? "Service unavailable" : "سرویس در دسترس نیست"; });
   (function () {
     var ov = document.getElementById("qrOv");
     if (!ov) return;
@@ -508,15 +510,27 @@
     if (__sb) __io.observe(__sb); else runStats();
   } catch (e) { setTimeout(runStats, 1500); }
   setTimeout(runStats, 4000);
+  function setLiveStat(id, val) {
+    var el = document.getElementById(id);
+    if (window.__statsSeen) countUp(el, val, "");
+    else { window.__pendingStats[id] = val; if (el) el.textContent = val; }
+  }
+  fetch("https://api.github.com/repos/mmdju/torob-mcp").then(function (r) { return r.json(); }).then(function (j) {
+    if (j && j.stargazers_count != null) {
+      document.getElementById("stars").textContent = "★ " + j.stargazers_count;
+      setLiveStat("stStars", j.stargazers_count);
+      if (j.forks_count != null) setLiveStat("stForks", j.forks_count);
+    }
+  }).catch(function () {});
   var FA_LINES = window.__lines.slice();
   var EN_LINES = [
     "The bridge between Torob and your AI.",
     "Just ask: «a phone under 200 million?»",
     "Read-only — no key, no login."
   ];
-  var HEALTH_OK_EN = "Service is live", STATS_EN = "14 tools · prices in Toman", NOTE_EN = "Independent project — not affiliated with Torob", SHARE_EN = "Share", SHARED_EN = "Link copied", GH_EN = "Guide", VER_EN = " · v", QR_EN = "QR", QRH_EN = "Scan with your phone", QRCOPY_EN = "Copy link", QRCLOSE_EN = "Close";
-  var HEALTH_OK_FA = "سرویس زنده است", STATS_FA = "۱۴ ابزار · قیمت به تومان", NOTE_FA = "پروژه‌ای مستقل — وابسته به ترب نیست", SHARE_FA = "اشتراک", SHARED_FA = "پیوند کپی شد", GH_FA = "راهنما", VER_FA = " · نسخه ", QR_FA = "کیوآر", QRH_FA = "اسکن با گوشی", QRCOPY_FA = "کپی پیوند", QRCLOSE_FA = "بستن";
-  var STATH_EN = "Service stats", STATH_FA = "آمار سرویس", STTL_EN = "Tools", STTL_FA = "ابزار", STVR_EN = "Version", STVR_FA = "نسخه", STST_EN = "Status", STST_FA = "وضعیت", STGR_EN = "Filter groups", STGR_FA = "گروه فیلتر", STLV_EN = "Live", STLV_FA = "زنده";
+  var HEALTH_OK_EN = "Service is live", STATS_EN = "14 tools · prices in Toman", NOTE_EN = "Independent project — not affiliated with Torob", SHARE_EN = "Share", SHARED_EN = "Link copied", GH_EN = "GitHub", VER_EN = " · v", QR_EN = "QR", QRH_EN = "Scan with your phone", QRCOPY_EN = "Copy link", QRCLOSE_EN = "Close";
+  var HEALTH_OK_FA = "سرویس زنده است", STATS_FA = "۱۴ ابزار · قیمت به تومان", NOTE_FA = "پروژه‌ای مستقل — وابسته به ترب نیست", SHARE_FA = "اشتراک", SHARED_FA = "پیوند کپی شد", GH_FA = "گیت‌هاب", VER_FA = " · نسخه ", QR_FA = "کیوآر", QRH_FA = "اسکن با گوشی", QRCOPY_FA = "کپی پیوند", QRCLOSE_FA = "بستن";
+  var STATH_EN = "Project stats", STATH_FA = "آمار پروژه", STST_EN = "Stars", STST_FA = "استار", STFK_EN = "Forks", STFK_FA = "فورک", STTL_EN = "Tools", STTL_FA = "ابزار", STVR_EN = "Version", STVR_FA = "نسخه";
   var isEn = false;
   document.getElementById("langB").addEventListener("click", function () {
     isEn = !isEn;
@@ -535,14 +549,12 @@
     document.getElementById("darkT").textContent = isEn ? (document.body.classList.contains("dark") ? "Light" : "Dark") : (document.body.classList.contains("dark") ? "روشن" : "تیره");
     window.__lines = isEn ? EN_LINES : FA_LINES;
     window.__lineIdx = 0;
-    document.getElementById("bugL").textContent = isEn ? "Report a problem" : "گزارش مشکل";
+    document.getElementById("bugL").textContent = isEn ? "Report a bug" : "گزارش باگ";
     document.getElementById("statsH").textContent = isEn ? STATH_EN : STATH_FA;
+    document.getElementById("stStarsK").textContent = isEn ? STST_EN : STST_FA;
+    document.getElementById("stForksK").textContent = isEn ? STFK_EN : STFK_FA;
     document.getElementById("stToolsK").textContent = isEn ? STTL_EN : STTL_FA;
     document.getElementById("stVersK").textContent = isEn ? STVR_EN : STVR_FA;
-    document.getElementById("stStatK").textContent = isEn ? STST_EN : STST_FA;
-    document.getElementById("stGroupsK").textContent = isEn ? STGR_EN : STGR_FA;
-    var stS = document.getElementById("stStat");
-    if (stS && stS.textContent.trim()) stS.textContent = isEn ? STLV_EN : STLV_FA;
     if (window.__startTyping) window.__startTyping();
     else document.querySelector(".sub").textContent = window.__lines[0];
     var dot = document.getElementById("dot");
