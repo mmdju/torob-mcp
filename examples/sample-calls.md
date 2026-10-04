@@ -92,7 +92,10 @@ result.
 
 ```
 special_offers { "limit": 5 }
-→ offers: [ { name: "پیشنهاد شگفت‌انگیز", results: [ … ] }, … ]
+→ count: 5
+  offers: [ { group: "پیشنهادهای ویژه", title: "خرید قسطی", description: "…",
+              image: "https://…", url: "https://torobpay.com/?…" }, … ]
+  note: "Torob's featured deals. For one product's sellers, use product_details instead."
 ```
 
 Featured deals are merchandising, not a product's seller list - keep the two

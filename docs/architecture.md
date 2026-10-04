@@ -35,7 +35,7 @@ Torob does not expose a product-by-id endpoint. A product id alone is **not** an
 What works is the `more_info_url` each search row carries: a ready-made absolute details URL that already contains the `search_id` needed to open the product. So:
 
 1. `search_products` returns cards - each carrying its `details_url` - and remembers each row's details URL against its `prk`.
-2. `product_details(prk, details_url)` opens the product with no lookup at all: the URL the caller echoes back carries what the endpoint needs, which is the only path that works on an isolate that never saw the search.
+2. `product_details(prk, details_url)` opens the product with no lookup at all: the URL the caller echoes back carries what the endpoint needs, which is the only path that works on an isolate that never saw the search. It is asked for before anything is remembered (a remembered address can outlive the `search_id` inside it), and a URL that names a **different** product than the `prk` is refused instead of opened - the `prk` is what the question is about, and answering about one product with another's page is a wrong price.
 3. Without the URL, the server falls back to what it remembers (in-process map, then the per-colo cache), then to searching by the product's **name** and matching the id again.
 4. Last, it tries the details endpoint with the id alone. Whatever answered, `resolved_by` says which path it was - `remembered`, `details-url`, `exact-id`, `name-search` or `id-only` - so a name match is never presented as the exact id.
 
@@ -58,17 +58,19 @@ So the server treats a challenge as a cooldown, not a failure to retry:
 
 ## Reading a response that answers 200
 
-The projection layer exists because a well-formed response can still be wrong in a way that reads as an answer. Three were found and fixed by live testing, not by reading code:
+The projection layer exists because a well-formed response can still be wrong in a way that reads as an answer. Four were found and fixed by live testing, not by reading code:
 
 - **A product id is not an address upstream, and not a search term.** Handing a search result's `prk` back as a query returns nothing. The server remembers the details URL it handed out, and shares the product's name through the per-colo Cache API so a *different* isolate can still re-resolve it - but the card's `details_url` is the path that needs no memory at all, and a name match is reported as such rather than passed off as the same id.
 - **A filter value is not a filter until upstream accepts it.** Torob ignores a slug or value it does not know and answers *unfiltered*, which reads as a filtered answer. Every search carries the filter groups it really accepts, with the values each takes, and a value outside that list is refused with the real ones.
 - **Ids arrive as both numbers and strings.** Province and city ids are numeric; a string-only coercion dropped every row of a perfectly good response, and the tool reported "no provinces exist" while upstream had 30.
-- **A field name guessed wrong returns an empty list, not an error.** `title` versus `name` on the location endpoints produced a clean `[]`. Every endpoint's shape was therefore verified against a live response before its tool shipped.
+- **A field name guessed wrong returns an empty list, not an error.** `title` versus `name` on the location endpoints produced a clean `[]`. Every endpoint's shape was therefore verified against a live response before its tool shipped - and the projection now refuses the case outright: rows that exist and cannot be read raise an error, because only `results: []` means "there is nothing here".
 
 ## Verify it yourself
 
 `node scripts/verify-live.mjs` (needs Node.js 18+, nothing to install).
 
-It drives the real endpoint the way an MCP client does. It paces its calls - Torob challenges a burst, so a check that hammers every tool in a second is testing the wrong thing - and reports a challenge as the finding it is **without failing the run**: the wall is upstream's answer to a fast caller, not a broken deployment, and the endpoint checks that never touch Torob are the ones a red badge reports on. Pass a gap in seconds as the first argument to slow it down further (`node scripts/verify-live.mjs 5`).
+It drives the real endpoint the way an MCP client does. It paces its calls - Torob challenges a burst, so a check that hammers every tool in a second is testing the wrong thing - and reports a challenge as the finding it is **without failing the run**: the wall is upstream's answer to a fast caller, not a broken deployment. Pass a gap in seconds to slow it further: `node scripts/verify-live.mjs 5`, or `node scripts/verify-live.mjs <url> 5` to point it elsewhere.
+
+A red badge on the [Test workflow](../.github/workflows/test.yml) means the code failed its own suite. The scheduled [Live verify](../.github/workflows/verify.yml) badge means the endpoint stopped answering its contract - health, version, landing, handshake, tool list - **or** that Torob renamed something a live check reads, since those checks fail the run too. A challenge is the one live failure that never reddens it.
 
 [examples/python.py](../examples/python.py) is a copy-paste client for the same endpoint.

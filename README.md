@@ -56,7 +56,7 @@ Notes for agent builders:
 - **An empty result is not proof a product does not exist.** The response carries `query_note` plus Torob's own `suggested_queries` - retry with one of them instead of telling the user it is unavailable.
 - **An unknown filter slug or value is refused with the real ones.** `available_filters` carries each group's accepted values (`options`, plus `values_url` for the full brand list); Torob ignores a slug or value it does not know and answers **unfiltered**, so a typo used to hand back a full unfiltered list that read as a filtered answer.
 - **Torob answers a client that calls too fast with a bot challenge instead of data.** The server reports it plainly, never solves or evades it, and holds the rest of a burst for five minutes rather than retrying into a longer block. Details in [SECURITY.md](SECURITY.md).
-- Results are **capped** (default 10, max 30) to protect agent context. Persian wording is folded (Arabic yeh/kaf, Persian and Arabic-Indic digits, ZWNJ kept) when cache keys and product names are compared - the query itself reaches Torob exactly as typed, and Torob folds it the same way.
+- Results are **capped** (default 10, and each tool's own maximum - 24 on a product search, 30 on most lists - is in [docs/tools.md](docs/tools.md)) to protect agent context. Persian wording is folded (Arabic yeh/kaf, Persian and Arabic-Indic digits, ZWNJ kept) when cache keys and product names are compared - the query itself reaches Torob exactly as typed, and Torob folds it the same way.
 - **[examples/sample-calls.md](examples/sample-calls.md)** has eleven copy-paste flows, and **[docs/tools.md](docs/tools.md)** has every parameter and filter slug. Response types live in **[docs/card.d.ts](docs/card.d.ts)**.
 
 ## How it works
@@ -96,12 +96,12 @@ Don't take my word for it - check the live server yourself:
 node scripts/verify-live.mjs   # needs Node.js 18+, nothing to install
 ```
 
-It drives the real endpoint the way an MCP client does, paces its calls, and compares the version the live service reports against the newest release in this repo - so a deployment that lags these docs cannot stay quiet. The same script runs **hourly in CI** ([![Live verify](https://github.com/mmdju/torob-mcp/actions/workflows/verify.yml/badge.svg)](https://github.com/mmdju/torob-mcp/actions/workflows/verify.yml)) - a red badge means the deployment drifted, because the endpoint checks never touch Torob's edge. A **bot challenge is reported without failing the run**: it is upstream's answer to a fast caller, not a broken deploy, and it clears on its own. See [docs/architecture.md](docs/architecture.md) for the full path, including why a product id is not an address upstream and how a challenge is handled, and [examples/python.py](examples/python.py) for a copy-paste client.
+It drives the real endpoint the way an MCP client does, paces its calls, and compares the version the live service reports against the newest release in this repo - so a deployment that lags these docs cannot stay quiet. The same script runs **hourly in CI** ([![Live verify](https://github.com/mmdju/torob-mcp/actions/workflows/verify.yml/badge.svg)](https://github.com/mmdju/torob-mcp/actions/workflows/verify.yml)) - a red badge there means the endpoint stopped answering its contract (health, version, landing, handshake, tool list), or that upstream renamed something those checks read: neither of those touches the deployment itself. A **bot challenge is reported without failing the run**: it is upstream's answer to a fast caller, not a broken deploy, and it clears on its own. The unit suite runs on every push instead ([![Test](https://github.com/mmdju/torob-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/mmdju/torob-mcp/actions/workflows/test.yml)), and that is the badge that means the *code* is healthy. See [docs/architecture.md](docs/architecture.md) for the full path, including why a product id is not an address upstream and how a challenge is handled, and [examples/python.py](examples/python.py) for a copy-paste client.
 
 ## Run it yourself
 
 ```bash
-npm install      # the one runtime dependency is a small Persian text helper
+npm install      # two runtime dependencies: the MCP SDK and a small Persian text helper
 npm test         # builds, then runs every test in the repo
 npm run dev      # the same Worker the live service runs, on your machine
 npm run probe    # re-checks every upstream endpoint this server reads
@@ -115,7 +115,7 @@ Torob's public web API (**undocumented, may change without notice**). This proje
 
 ## Status
 
-**Free public service** on Cloudflare Workers, read-only and keyless. This hosted copy answers **at most 20 `/mcp` calls a minute per client IP** - a whole sweep of the tools takes about four, so a normal conversation never notices, while a script cannot use the service as an unmetered price API. Over the limit you get HTTP 429 with a `retry-after` header; **running the server yourself has no limit at all**. Separately, the pacing this server applies is to **Torob**, not to you, because Torob challenges a caller that goes too fast. See [SECURITY.md](SECURITY.md).
+**Free public service** on Cloudflare Workers, read-only and keyless. This hosted copy answers **at most 20 `/mcp` calls a minute per client IP** - the fourteen tools take fourteen calls, plus the product and shop lookups they lead to, so an ordinary conversation stays inside it while a script cannot use the service as an unmetered price API. Over the limit you get HTTP 429 with a `retry-after` header; **running the server yourself has no limit at all**. Separately, the pacing this server applies is to **Torob**, not to you, because Torob challenges a caller that goes too fast. See [SECURITY.md](SECURITY.md).
 
 ## License
 

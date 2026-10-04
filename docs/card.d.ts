@@ -164,6 +164,7 @@ export interface SearchResponse {
   /** Torob's own count is approximate; page with has_next_page. */
   total_matches_note: string;
   page: number;
+  /** How many cards the upstream page held, before `limit` trimmed it - not how many pages exist. */
   page_count: number;
   has_next_page: boolean;
   price_range_toman: { min: Toman | null; max: Toman | null };
@@ -177,6 +178,15 @@ export interface SearchResponse {
   brand_values?: { name: string; value: string; slug: string }[];
   brand_values_note?: string;
   attribution: string;
+  /** Present when the page held more cards than `limit` asked for. */
+  truncated?: boolean;
+  returned?: number;
+  note?: string;
+  /** Torob read the query differently and shows what it used instead. */
+  query_corrected?: string;
+  /** Category ids for this wording; each is usable as `category` on the next call. */
+  suggested_categories?: { id: string; title: string }[];
+  category_note?: string;
   /** Present when nothing matched: an empty result is not proof of absence. */
   query_note?: string;
   suggested_queries?: string[];
@@ -205,6 +215,10 @@ export interface DetailsResponse {
   /** Present when postage changes which shop is cheapest overall. */
   cheapest_vs_delivered?: string;
   offers: Offer[];
+  /** Present when more offers exist than `max_offers` asked for. */
+  offers_truncated?: boolean;
+  offers_returned?: number;
+  note?: string;
   /** How many shops sell this product in person, before max_in_person slices it. */
   in_person_count: number;
   in_person_sellers: InPersonSeller[];
@@ -240,8 +254,8 @@ export interface CompareRow {
   best_rated_shop?: string | null;
   best_rated_score?: number | null;
   url?: string;
-  /** Present when this one product could not be read; the rest still answer. */
-  error?: string;
+  /** Always present: null when this row was read, the reason when it was not - the other rows still answer. */
+  error: string | null;
 }
 
 export interface CompareResponse {
@@ -264,8 +278,18 @@ export interface BestValueResponse {
   matches_in_budget: number;
   best_value: ProductCard | null;
   picks: ProductCard[];
-  /** Present with include_delivery: the cheapest picks with their postage. */
-  delivered?: { prk: string; name_fa: string | null; cheapest_price_toman: Toman | null; cheapest_delivered_offer: Offer | null }[];
+  /**
+   * Present with include_delivery: the cheapest picks with their postage. A
+   * pick whose seller list could not be read carries only `prk` and
+   * `delivery_error` - `delivery_note` counts those as unread, not as read.
+   */
+  delivered?: {
+    prk: string;
+    name_fa?: string | null;
+    cheapest_price_toman?: Toman | null;
+    cheapest_delivered_offer?: Offer | null;
+    delivery_error?: string;
+  }[];
   delivery_note?: string;
   attribution: string;
   /** Present when nothing fit: says what the cheapest in-stock result was. */

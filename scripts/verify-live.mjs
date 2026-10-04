@@ -1,10 +1,15 @@
 // Verifies the deployed endpoint end to end, the way a real MCP client does:
 // initialize, list tools, then one call per tool. No dependencies.
 //
-// Run: node scripts/verify-live.mjs [url] [gap-ms]
+// Run: node scripts/verify-live.mjs [url] [gap-seconds]
+// Either argument may be left out, and a bare number counts as the gap, so
+// `node scripts/verify-live.mjs 5` slows the run down the way the docs say it
+// does instead of being read as a host and failing on the first fetch.
 import { readFile } from "node:fs/promises";
 
-const BASE = process.argv[2] ?? "https://torob-mcp.mmdju3.workers.dev";
+const ARGS = process.argv.slice(2);
+const isCount = (a) => /^\d+$/.test(a);
+const BASE = ARGS.find((a) => !isCount(a)) ?? "https://torob-mcp.mmdju3.workers.dev";
 const MCP = `${BASE}/mcp`;
 
 let sessionId = null;
@@ -109,7 +114,8 @@ JSON.stringify(tools) === JSON.stringify(expected) ? ok("tools/list", `${tools.l
 // stops at the first challenge. A challenge is Torob's answer, not a broken
 // deploy: it is reported and the run exits 0, because the wall is upstream's
 // behaviour and the contract checks above it already passed.
-const gap = Number(process.argv[3] ?? 15000);
+const gapSeconds = Number(ARGS.filter(isCount)[0] ?? 15);
+const gap = gapSeconds * 1000;
 const pause = () => new Promise((r) => setTimeout(r, gap));
 let id = 3;
 let challenged = false;

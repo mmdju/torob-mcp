@@ -5,7 +5,7 @@ Torob MCP is a read-only public service. There is nothing to log in to and no us
 - All 14 tools are read-only. No tool can change, delete or publish anything, and no shop is ever contacted.
 - No API keys are needed to use the hosted endpoint.
 - The server never signs in to Torob and never solves or evades a bot challenge - a challenge is reported as a clear, actionable error instead.
-- Nothing is persisted server-side. The only state is a short-lived response cache and a small map of product ids the server handed out, both scoped to a single isolate.
+- Nothing about a caller is stored: no accounts, no request logs, no query history. The state the server does keep, and why: a short-lived response cache plus a map of product ids it handed out (both scoped to a single isolate); a per-colo cache holding a product's name and details URL for 24 hours and a query's filter groups for 30 minutes, so a second isolate does not pay for a lookup the first one made; and the rate limiter's per-client-IP counter in a Durable Object (below).
 - Data comes from Torob's public web API, which is undocumented and can change without notice. This project is not affiliated with or endorsed by Torob.
 
 ## The Bot Challenge
@@ -23,7 +23,7 @@ This server treats a challenge as a cooldown, not a failure to retry:
 
 The hosted copy at `torob-mcp.mmdju3.workers.dev` answers at most **20 `POST /mcp` calls a minute per client IP**. Over the limit it returns **HTTP 429** with a JSON-RPC error body, a `retry-after` header and `x-ratelimit-limit` / `x-ratelimit-remaining`, so a client can see where it stands instead of guessing.
 
-Twenty a minute is far above a real conversation: a whole sweep of the tools, one call at a time with a pause between, is about four. It is low enough that a script cannot use this service as an unmetered price API. The count is kept in a **Durable Object**, one per client IP, so it is exact and the same in every colo instead of being tracked separately by each - a weaker per-colo cache only stands in if that binding is ever missing, which can never fail the request it protects. Only `/mcp` is limited: the landing page, the connect page, the fonts and `/health` keep answering, so a browser is never locked out of the page that explains the limit.
+Twenty a minute is far above a real conversation: the fourteen tools take fourteen calls, plus the product and shop lookups a conversation leads to, which still lands inside the window. It is low enough that a script cannot use this service as an unmetered price API. The count is kept in a **Durable Object**, one per client IP, so it is exact and the same in every colo instead of being tracked separately by each - a weaker per-colo cache only stands in if that binding is ever missing, which can never fail the request it protects. Only `/mcp` is limited: the landing page, the connect page, the fonts and `/health` keep answering, so a browser is never locked out of the page that explains the limit.
 
 **A self-hosted run has no limit.** The limiter lives in `src/rate-limit.ts` and is imported by `src/worker.ts` alone; the server core and the Node entry point do not know it exists.
 
@@ -35,7 +35,7 @@ The endpoint is **keyless and read-only**, so it sends `Access-Control-Allow-Ori
 
 ## Input handling
 
-- Every argument is validated against a closed schema (`additionalProperties: false`).
+- Every tool **advertises** a closed schema (`additionalProperties: false`, added when the tool list is served), which is what tells a client what is accepted. The server itself coerces every argument rather than trusting its type, and validates the ones where a wrong value would silently change an answer: filter slugs and values against the groups that search really accepts, price bounds against each other, pages and limits clamped, URLs parsed rather than followed. An unknown property is ignored, not acted on.
 - All arguments are coerced from unknown input, never trusted.
 - Result lists are capped so a single call cannot ask for an unbounded upstream crawl.
 - Upstream URLs are built from validated parameters, and the details URL is followed as returned by Torob rather than assembled from user input, so no caller-supplied string is ever used to redirect the fetch.

@@ -2,7 +2,7 @@
 
 Input/output reference for all **14 tools**. Types only - no internals. For conversation flows, see [examples/sample-calls.md](../examples/sample-calls.md). The response types are also kept in [card.d.ts](card.d.ts).
 
-Every tool is **read-only** and needs **no credentials**. Result lists are **capped** (default 10, max 30). All prices are in **Toman**.
+Every tool is **read-only** and needs **no credentials**. Result lists are **capped** (default 10; the maximum is per tool and stated in its table - 24 on a product search, 15 on `find_best_value`, 24 on the shop and image lists, 30 on most others). All prices are in **Toman**.
 
 Which tool for what - the short version:
 
@@ -25,8 +25,8 @@ Which tool for what - the short version:
 
 Shared conventions:
 
-- `limit` - how many items to return (default 10, max 30).
-- `page` - 1-based page number, max 50. Deep pages cost an extra upstream request; a clamped page comes back with `page_clamped`, `page_requested` and `page_note`.
+- `limit` - how many items to return (default 10; the maximum belongs to the tool and is in its table below).
+- `page` - 1-based page number. The maximum belongs to the tool: **50** on `search_products`, **20** on `find_shops`, on `search_by_image` and on a `shop_profile` catalogue. Deep pages cost an extra upstream request, and a clamped page comes back with `page_clamped`, `page_requested` and `page_note` naming the real maximum - on all four paged tools, not just the search.
 - `prk` - Torob's product id, as a UUID. It comes from a `search_products` card and can be passed back as a bare id, a `/p/<id>/` path, or a full `torob.com` product URL. Torob cannot look a product up by id alone, so an id is only usable after this server has returned it - or with the `details_url` from the same card, which resolves it with no server-side memory at all.
 - `shop_id` - a **numeric** shop id, from any offer in `product_details` or from `find_shops`. It is what `shop_profile` takes.
 - `price_toman: null` means **not available** - out of stock upstream, or no price at all. It is never 0, and 0 is never free.
@@ -55,15 +55,15 @@ Search Torob, get **compact cards**: the cheapest offer in Toman, the shop behin
 | `page` | number | 1-based, max 50 |
 | `sort` | string | `popularity` (default, most relevant) · `price` (cheapest first) · `expensive` (dearest first) · `newest` (newest first) · `sellers` (most sellers) |
 | `category` | string | Torob category id, from `suggested_categories` or `browse_categories` |
-| `brand` | string | Brand **id** from the brand group of `available_filters` (`options[].value`, `brand_values[].value`, or the `id` of an entry in the full list at its `values_url`), e.g. `17418` for MikroTik. Torob filters on the id and ignores a slug or display name; either is mapped onto the id when this search showed the brand group |
+| `brand` | string | Brand **id** from the brand group of `available_filters` (`options[].value`, `brand_values[].value`, or the `id` of an entry in the full list at its `values_url`), e.g. `17418` for MikroTik. Torob filters on the id and ignores a slug or display name; a name or slug is mapped onto the id when this search shows the brand group, and a **word that maps to nothing is refused with the brands the search really offers** instead of being sent and silently dropped. A brand passed inside `filters` is taken over by this argument, so it is never echoed back as an applied filter |
 | `city` | string | Delivery-city id, from `list_locations` |
 | `shop_type` | string | `offline` (products that have an in-person seller) · `online` (online sellers) |
 | `min_price_toman` | number | Only products at or above this price |
 | `max_price_toman` | number | Only products at or below this price |
 | `filters` | object | Values from `available_filters` of the same query, e.g. `{"available": "1", "storage": "1 tb"}`. A value the search does not offer is refused with the real ones |
-| `limit` | number | How many cards (default 10, max 30) |
+| `limit` | number | How many cards (default 10, max 24 - upstream returns 24-26 rows a page whatever is asked) |
 
-Returns: `total_matches`, `total_matches_note`, `page`, `page_count`, `has_next_page`, `price_range_toman` (`{min, max}`), `price_bounds_toman`, `products[]`, `available_filters`, `brand_values`, `filters_applied`, `sort_meaning`, `attribution`. `total_matches_note` is there because Torob's own count moves between identical requests - page with `has_next_page` instead of quoting the number.
+Returns: `total_matches`, `total_matches_note`, `page`, `page_count` (how many cards **this page** held before `limit` trimmed it - not how many pages exist), `has_next_page`, `price_range_toman` (`{min, max}`), `price_bounds_toman`, `products[]`, `available_filters`, `brand_values`, `filters_applied`, `sort_meaning`, `attribution`. `total_matches_note` is there because Torob's own count moves between identical requests - page with `has_next_page` instead of quoting the number.
 
 Each card: `prk`, `name_fa`, `name_en`, `price_toman`, `price_text`, `available`, `shop_name`, `image`, `image_count`, `badges[]`, `url`, `is_adv`, `details_url`.
 
@@ -101,7 +101,7 @@ One product plus **every seller offer**, sorted cheapest available first, and **
 | Param | Type | Required | Notes |
 |---|---|---|---|
 | `prk` | string | **yes** | From a `search_products` card, or a torob.com product URL |
-| `details_url` | string | no | The `details_url` from the same card. Pass it back and the product opens with no lookup at all - the path that works on a Worker isolate that never saw the search |
+| `details_url` | string | no | The `details_url` from the same card. Pass it back and the product opens with no lookup at all - the path that works on a Worker isolate that never saw the search. It is checked against `prk`: a URL carrying a different product is refused rather than opened |
 | `max_offers` | number | no | How many offers (default 10, max 30) |
 | `max_in_person` | number | no | How many in-person shops (default 10, max 30). They come in the same response, so this costs no extra request |
 
@@ -228,7 +228,7 @@ One Torob shop as Torob itself profiles it - trust, contact terms and (on reques
 |---|---|---|---|
 | `shop_id` | string | **yes** | The numeric `shop_id` from a `product_details` offer, or from `find_shops` |
 | `include_products` | boolean | no | Also list the shop's own catalogue. **Costs one extra upstream request** |
-| `page` | number | no | Catalogue page, 1-based (default 1) |
+| `page` | number | no | Catalogue page, 1-based (default 1, max 20) |
 | `limit` | number | no | How many catalogue cards (default 10, max 24) |
 
 Returns the profile:
@@ -270,8 +270,8 @@ Find products from a picture. Pass a public image URL; Torob fetches it itself.
 | Param | Type | Required | Notes |
 |---|---|---|---|
 | `image_url` | string | **yes** | A public `http(s)` URL. Nothing is uploaded from here, so the link has to be reachable from the internet |
-| `page` | number | no | 1-based (default 1) |
-| `limit` | number | no | How many cards (default 10, max 30) |
+| `page` | number | no | 1-based (default 1, max 20) |
+| `limit` | number | no | How many cards (default 10, max 24 - the image search pages 24 at a time) |
 
 Returns `image_url` (Torob's echo of what it looked at), `page`, `has_next_page`, `products[]` (cards), `matched_product` when Torob recognised the image as one specific product, `detected_objects[]` when it says what it saw, and a `note`.
 
@@ -310,9 +310,9 @@ Provinces, or a province's cities. City ids are what `search_products` accepts a
 |---|---|---|---|
 | `province_id` | string | no | Given → that province's cities; omitted → the provinces |
 | `search` | string | no | Filter by name, e.g. `تهران` |
-| `limit` | number | no | How many (default 30, max 200) |
+| `limit` | number | no | How many (default 30 for cities, **all** provinces, max 200) |
 
-Returns `mode` (`provinces` or `cities`), `count`, and `provinces[]` / `cities[]` with `id` and `name`. With only a `search` and no province, it searches cities nationwide.
+Returns `mode` (`provinces` or `cities`), `count`, and `provinces[]` / `cities[]` with `id` and `name`. With only a `search` and no province, it searches cities nationwide. When a list is longer than `limit` (cities can be), the answer also carries `total`, `truncated` and a `note` saying how many were left out - `count` is what came back, not the whole set.
 
 In provinces mode it also returns `popular_cities` - the cities Torob's own visitors pick most (تهران، مشهد، اصفهان، تبریز، شیراز) - so a city id does not have to be guessed. That hint costs one extra upstream request, cached for a day, and is omitted if it cannot be read.
 

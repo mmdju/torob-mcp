@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.request
 
 ENDPOINT = os.environ.get("TOROB_MCP_URL", "https://torob-mcp.mmdju3.workers.dev/mcp")
@@ -30,8 +31,16 @@ def rpc(method, params=None, rid=1):
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=30) as res:
-        text = res.read().decode("utf-8", "replace")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as res:
+            text = res.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as err:
+        # The hosted copy answers 429 with a retry-after header when a client
+        # goes over its 20 calls a minute; the body is JSON-RPC, not a result.
+        if err.code == 429:
+            wait = err.headers.get("retry-after", "60")
+            raise RuntimeError(f"rate limited by the hosted copy - wait {wait}s and retry") from err
+        raise
     payload = next(
         (line[5:].strip() for line in reversed(text.splitlines()) if line.startswith("data:")),
         text,
@@ -42,7 +51,13 @@ def rpc(method, params=None, rid=1):
 def call(name, arguments, rid):
     res = rpc("tools/call", {"name": name, "arguments": arguments}, rid=rid)
     time.sleep(GAP)
-    return json.loads(res["result"]["content"][0]["text"])
+    text = res["result"]["content"][0]["text"]
+    if res["result"].get("isError"):
+        # A failed tool answers in plain English - "search for it first", "this
+        # brand is not one the search offers" - not in JSON. Parsing it as JSON
+        # would hide that sentence behind a traceback.
+        raise RuntimeError(text)
+    return json.loads(text)
 
 
 def card_text(card):
@@ -79,8 +94,13 @@ def main():
         return
 
     # The seller list is the reason a Torob MCP exists - it needs its own call.
+    # The card's own details_url goes with the id: echoing it back opens the
+    # product with no server-side memory, which is the path that always works.
     prk = items[0]["prk"]
-    details = call("product_details", {"prk": prk, "max_offers": 5}, rid=5)
+    detail_args = {"prk": prk, "max_offers": 5}
+    if items[0].get("details_url"):
+        detail_args["details_url"] = items[0]["details_url"]
+    details = call("product_details", detail_args, rid=5)
     offers = details.get("offers") or []
     print(f"\ndetails prk={prk} | offers: {len(offers)} | spread: {details.get('price_spread_toman')}")
     for offer in offers:
@@ -95,4 +115,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (RuntimeError, urllib.error.URLError) as err:
+        # The server's own explanations are the useful part - print them as
+        # sentences rather than as a traceback.
+        print(f"error: {err}", file=sys.stderr)
+        sys.exit(1)
