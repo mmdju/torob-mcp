@@ -82,6 +82,31 @@ node dist/index.js --http     # Streamable HTTP on :3000/mcp
 
 Or `npx -y github:mmdju/torob-mcp`, which builds through the `prepare` script on a checkout that has no `dist/` yet.
 
+## The MCPB bundle
+
+`npm run build:mcpb` packages that same Node entry as `build/torob-mcp.mcpb`, the single file an MCPB host installs. The whole design is one sentence: **the bundle contains no second implementation of the MCP server.** It stages `dist/index.js` and the modules that file imports, copies the dependencies that file needs, and lets the host run `node ${__dirname}/dist/index.js` - the entry point `node dist/index.js` has always launched, over the same stdio transport, with `buildServer` and the same fourteen tools behind it. The tools, the projection layer, the Torob integration, the pacing and the bot-wall gate are therefore identical in all three deployments, and a fix to a tool is a fix in all of them.
+
+```mermaid
+flowchart TB
+    clone[(clone)] --> build["npm run build:mcpb<br/>scripts/build-mcpb.mjs"]
+    build --> stage["build/mcpb/ staging<br/>dist/ import closure + production deps"]
+    stage --> cli["mcpb validate + pack<br/>@anthropic-ai/mcpb, pinned"]
+    cli --> bundle[("build/torob-mcp.mcpb")]
+    bundle --> host[MCPB host installs it]
+    host --> entry["node dist/index.js<br/>stdio, inside the unpacked bundle"]
+    entry --> server["buildServer()<br/>src/server.ts"]
+    server --> tools[the 14 tools]
+    server --> torob[(Torob public web API)]
+```
+
+Three decisions in that script are worth keeping in mind:
+
+- **The bundle is staged, not copied.** `dist/` holds both the Node build and the Worker build, so the script follows the entry point's static relative-import closure and copies only what it reaches. That walk is what excludes `worker.js`, the rate limiter and the landing-page assets - a new import cannot quietly add one back, and an import that does not resolve is a build failure rather than a broken bundle in somebody's host. The dependency tree comes from npm's own `npm ls --omit=dev` answer, minus what npm reports as `extraneous`, because the bundle runs `node` outside any install.
+- **The version is written, not maintained twice.** `manifest.json` is the template, and the packed copy takes its `version` from `package.json` - the single version source `tests/version-sync.test.mjs` already holds the server and the changelog to, so a bundle cannot claim a version the project is not on. The tool *names* are not rewritten; they are checked instead, statically against `TOOLS` by `tests/mcpb.test.mjs` and at runtime against the served tool list by `scripts/verify-mcpb.mjs`, because a manifest advertising a tool the server does not have is the failure a host shows the user.
+- **The artifact is read back.** The official CLI validates and packs, then the script unpacks what it just wrote and fails on a missing required file, a version mismatch, or a forbidden one - `.env*`, `.dev.vars`, `.git`, keys, certificates, lockfiles, `node_modules/.bin`, or a Worker-only module. The staging list is built from the import graph rather than "everything except a deny-list", so a file that nothing imports cannot reach the bundle in the first place.
+
+The bundle declares **no `user_config`**, no `env` block and no platform overrides, because the server needs no credential: Torob requires none and this server never signs in. The two environment variables a local run honours - `TOROB_MCP_HOME` and `TOROB_MCP_STORE=off` - belong to the host's environment, not to the bundle, and behave exactly as they do for `node dist/index.js`. The 20 calls/minute limit stays where it was, on the hosted Worker, so an MCPB run has no limit of ours; Torob's own pacing and bot wall still apply.
+
 ## Verify it yourself
 
 `node scripts/verify-live.mjs` (needs Node.js 18+, nothing to install).
@@ -91,5 +116,7 @@ It drives the real endpoint the way an MCP client does. It paces its calls - Tor
 A red badge on the [Test workflow](../.github/workflows/test.yml) means the code failed its own suite. The scheduled [Live verify](../.github/workflows/verify.yml) badge means the endpoint stopped answering its contract - health, version, landing, handshake, tool list - **or** that Torob renamed something a live check reads, since those checks fail the run too. A challenge is the one live failure that never reddens it.
 
 `node scripts/verify-pack.mjs` is the packaging half of the same idea: it packs the project, installs the tarball into a throwaway project and drives the installed bin through a handshake, so a `files` list that forgot `dist/` fails as a broken package rather than as a silent one. It needs the network and git, so it is run by hand and is not part of `npm test`.
+
+`node scripts/verify-mcpb.mjs` is the bundle's version of that check: it unpacks `build/torob-mcp.mcpb` into an empty directory, launches it exactly as the manifest says, and drives a handshake, a tool list and one real `torob_suggest` call - a bundle can be well formed and still not start. Also run by hand, for the same reason.
 
 [examples/python.py](../examples/python.py) is a copy-paste client for the same endpoint.

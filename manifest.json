@@ -1,0 +1,101 @@
+{
+  "manifest_version": "0.3",
+  "name": "torob-mcp",
+  "display_name": "Torob MCP - price comparison intelligence",
+  "version": "0.5.3",
+  "description": "MCP server for Torob (Iran's price-comparison engine): search, compare and price-check across shops. Read-only, no API key.",
+  "long_description": "Torob is Iran's price-comparison engine. This bundle runs the torob-mcp server locally over stdio, so an agent can search Torob, read every seller's offer on a product, compare prices across shops, check a product's own price history, look up a seller's Torob profile, find products from a picture link, walk the category tree and list provinces and cities - all in Toman.\n\nAll fourteen tools are read-only and need no API key, no account and no login. This server never signs in to Torob, never solves or evades a bot challenge and never contacts a shop; a challenge is reported as a clear, actionable error instead of being retried into a longer block, which is exactly how the hosted service behaves.\n\nThe bundle is the local half of torob-mcp. The hosted Cloudflare Workers endpoint at https://torob-mcp.mmdju3.workers.dev/mcp is unchanged and still available for clients that prefer a remote URL. A self-hosted run like this one has no rate limit of its own; the hosted copy answers at most 20 `/mcp` calls a minute per client IP.\n\nPrices and stock move constantly, and an answer may be served from what this server fetched up to half an hour ago - always confirm on torob.com before buying. This project is not affiliated with or endorsed by Torob.",
+  "author": {
+    "name": "mmdju",
+    "url": "https://github.com/mmdju"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mmdju/torob-mcp"
+  },
+  "homepage": "https://torob-mcp.mmdju3.workers.dev/",
+  "documentation": "https://github.com/mmdju/torob-mcp/blob/main/docs/tools.md",
+  "support": "https://github.com/mmdju/torob-mcp/issues",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"]
+    }
+  },
+  "tools": [
+    {
+      "name": "torob_suggest",
+      "description": "Turn vague or colloquial wording into the search terms Torob itself suggests."
+    },
+    {
+      "name": "search_products",
+      "description": "Search Torob and get compact product cards: the cheapest offer in Toman, the shop behind it, image, badges, product URL, and the filter groups this search really accepts."
+    },
+    {
+      "name": "product_details",
+      "description": "One product plus every seller offer, cheapest first, with shop scores, vote counts, postage and guarantee - plus the shops selling it in person."
+    },
+    {
+      "name": "price_history",
+      "description": "Torob's own monthly price chart for one product, its lowest and highest charted prices, and - with include_changes - the newest moves across its shops."
+    },
+    {
+      "name": "similar_products",
+      "description": "Products Torob considers comparable to one this server has already returned, cheapest first, as cards."
+    },
+    {
+      "name": "compare_products",
+      "description": "Put 2-5 products side by side: cheapest price, number of sellers, the price spread between shops and the best rated seller."
+    },
+    {
+      "name": "find_best_value",
+      "description": "Search for the user's item and rank what is actually buyable under a budget in Toman, out-of-stock rows excluded."
+    },
+    {
+      "name": "shop_profile",
+      "description": "One shop as Torob profiles it: trust seal, score and vote count, Torob's own notes, city, address, payment and delivery options - and with include_products its own catalogue."
+    },
+    {
+      "name": "find_shops",
+      "description": "Search Torob's shop directory - businesses, not products - by name or by city, every row carrying the id shop_profile needs."
+    },
+    {
+      "name": "search_by_image",
+      "description": "Match products to a public image URL; when Torob recognises the picture as one specific product, matched_product names it."
+    },
+    {
+      "name": "torob_trends",
+      "description": "What Torob's shoppers are searching right now, each with one sample product."
+    },
+    {
+      "name": "browse_categories",
+      "description": "Walk Torob's category tree one level at a time, each category carrying its product count."
+    },
+    {
+      "name": "list_locations",
+      "description": "List Torob's provinces, or the cities of one province, with the ids search_products accepts."
+    },
+    {
+      "name": "special_offers",
+      "description": "The deals Torob is featuring right now - merchandising, not a product's seller list."
+    }
+  ],
+  "keywords": [
+    "torob",
+    "mcp",
+    "model-context-protocol",
+    "price-comparison",
+    "iran",
+    "shopping"
+  ],
+  "license": "MIT",
+  "privacy_policies": ["https://github.com/mmdju/torob-mcp/blob/main/SECURITY.md"],
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=18"
+    }
+  }
+}

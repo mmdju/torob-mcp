@@ -2,6 +2,22 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
+## Unreleased
+
+The local server can now be installed as one file, the way an MCPB host expects. Nothing about the hosted service or the fourteen tools changed.
+
+### Added
+
+- **`manifest.json` and `npm run build:mcpb`, producing `build/torob-mcp.mcpb`.** MCPB - the format `.dxt` became - is how a host installs a bundle and starts it with no build step, and there was no way to get this server into one. The manifest names `dist/index.js`, the local stdio entry that already existed, resolved through `${__dirname}` so a host launches the same server a `node` invocation does wherever it unpacked it. It declares no `user_config`, because there is nothing to configure: no key, no login, no token, and the `SECURITY.md` handling notes are what the format offers instead.
+
+  The build stages rather than copies the whole tree, because `dist/` also holds the Worker build: the entry point's own static relative-import closure is followed, so the bundle carries the eleven modules it imports and leaves `worker.js`, the rate limiter and the landing-page assets behind. The production dependency closure goes with it, since the bundle runs `node` outside any install. The manifest's `version` is written from `package.json` at build time, so a bundle cannot claim a version the project is not on; the staged folder is then handed to the official `@anthropic-ai/mcpb` CLI - pinned as an exact devDependency, since a globally installed one would make the artifact depend on whatever a machine happens to have - to validate and pack, and the finished archive is read back afterwards. A missing module, a stale version or a stray `.env` or secret-key file fails the build instead of shipping.
+
+- **`node scripts/verify-mcpb.mjs`.** `build:mcpb` proves the archive is well formed; this proves it runs. It unpacks the bundle into an empty directory outside the repository, launches it exactly as the manifest says, completes an initialize handshake, checks the version it reports against the manifest and the served tool names against the declared ones, and makes one real read-only call (`torob_suggest`) against Torob. It needs the network, so it is run by hand like `verify-live.mjs` and `verify-pack.mjs`, and is not wired into `npm test`.
+
+- **`tests/mcpb.test.mjs`, twelve gates that need no bundle.** The manifest is validated against the schema the pinned CLI ships rather than a copy of it, held to `package.json`'s version, checked against the file the local server actually launches, and required to declare exactly `TOOLS` - the failure mode being a bundle that installs cleanly and then offers a tool the server does not have, or hides one it does. `npm run build:mcpb` also runs on every push in the Test workflow, since the suite checks the manifest and only the build checks the artifact.
+
+- **MCPB is documented in `README.md`, `README_FA.md` and `docs/architecture.md`**: what the format is and is not, how the bundle relates to the hosted deployment, what the build stages and excludes, that it declares no `user_config`, and how to verify it by hand.
+
 ## 0.5.3 - 2026-10-04
 
 Found by watching the gate answer the live service instead of by reading it: it kept saying "retry in about 5 minutes" when it was supposed to escalate.

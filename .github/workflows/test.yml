@@ -5,7 +5,8 @@ name: Test
 # Torob stubbed, so it never touches the live API. Keeping it on push and pull
 # request (rather than joining verify.yml's hourly schedule) also keeps CI out
 # of Torob's rate window - that schedule is for the endpoint, this one is for
-# the code.
+# the code. It ends by packing the MCPB bundle, which is the one thing here that
+# produces an artifact.
 on:
   push:
     branches: [main]
@@ -24,3 +25,9 @@ jobs:
       # registry is fetched over https, so no deploy key is needed here.
       - run: npm ci
       - run: npm test
+      # The bundle is the one artifact that is not checked by the suite above:
+      # those gates read manifest.json, while this stages dist/, runs the real
+      # MCPB CLI over it and reads the packed archive back. It needs no network
+      # beyond the install, so a manifest that only validates on this machine
+      # fails here instead.
+      - run: npm run build:mcpb

@@ -1,8 +1,10 @@
 node_modules/
 dist/
+build/
 .wrangler/
 .dev.vars
 .env
 *.log
+*.mcpb
 *.tgz
 .DS_Store
