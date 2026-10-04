@@ -2,6 +2,12 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
+## 0.5.1 - 2026-10-04
+
+### Fixed
+
+- **A retry no longer holds every other call hostage.** The one-call-at-a-time slot that 0.5.0 introduced was released only when an attempt finished - and a retry waits before it starts the next one. A single upstream 5xx therefore kept the slot for its whole backoff, up to twelve seconds, during which no other tool on that isolate could reach Torob: one blip became a global stall. The slot now covers the fetch and nothing else. A caller backs off on its own time, and resolving the slot twice is a no-op, so the guarantee that a challenged burst costs exactly one request is unchanged.
+
 ## 0.5.0 - 2026-10-04
 
 The service can now run on a machine of your own, and the bot wall stops costing a request every time something new hears about it.

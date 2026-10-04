@@ -565,3 +565,37 @@ test("a search page past the last one says it was clamped instead of quoting it"
   assert.equal(out.page_requested, 99);
   assert.match(String(out.page_note), /50/);
 });
+
+test("a retry backs off without holding every other call hostage", async () => {
+  // The slot exists so two fetches cannot overlap - not so one caller's backoff
+  // can stall everyone queued behind it. Retries wait seconds by default; if
+  // the slot were held across that, a single flaky upstream would become a
+  // global stall for every tool on this process.
+  setRetryDelayForTests(400);
+  let attempts = 0;
+  stub((url) => {
+    if (url.includes("sluggish") && ++attempts === 1) {
+      return new Response("upstream exploded", { status: 500 });
+    }
+    return { ...searchPayload, results: [searchPayload.results[0]], count: 1 };
+  });
+
+  try {
+    const slow = run("search_products", { query: "sluggish-query" });
+    slow.catch(() => {});
+    // Let the first call take the slot and reach its backoff before the second
+    // one arrives, so the second is genuinely queued behind it.
+    await new Promise((r) => setTimeout(r, 25));
+
+    const finished = await Promise.race([
+      run("search_products", { query: "fast-query" }).then(() => "finished"),
+      new Promise((r) => setTimeout(() => r("stalled"), 250)),
+    ]);
+    assert.equal(finished, "finished", "a second call must not wait out someone else's retry backoff");
+
+    await slow;
+    assert.equal(attempts, 2, "the 500 was retried exactly once");
+  } finally {
+    setRetryDelayForTests(0);
+  }
+});

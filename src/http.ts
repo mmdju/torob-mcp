@@ -284,6 +284,11 @@ export async function torobGet<T = unknown>(path: string, opts?: { retries?: num
             throw lastError;
           }
           if (attempt < retries) {
+            // Back off without holding the slot: the slot is there so two
+            // fetches cannot overlap, not so one caller's retry delay can stall
+            // every other call behind it. Resolving twice is a no-op, so the
+            // finally below stays correct.
+            release();
             await sleep(retryDelay(attempt));
             continue;
           }
@@ -307,6 +312,9 @@ export async function torobGet<T = unknown>(path: string, opts?: { retries?: num
       if (err instanceof UpstreamError && (err.kind === "challenged" || err.kind === "usage")) throw err;
       lastError = err;
       if (attempt < retries) {
+        // Same as the 5xx path above: the backoff is this caller's problem, not
+        // the whole isolate's.
+        release();
         await sleep(retryDelay(attempt));
         continue;
       }
