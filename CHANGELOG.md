@@ -2,6 +2,19 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
+## 0.5.3 - 2026-10-04
+
+Found by watching the gate answer the live service instead of by reading it: it kept saying "retry in about 5 minutes" when it was supposed to escalate.
+
+### Fixed
+
+- **The long stage could never be reached across processes.** The gate's two stages exist so that one probe per stage replaces one probe per isolate, and both halves of the state that makes that work were being lost:
+
+  - The stored record's lifetime was tied to its own stage, so a first-stage record was gone seven minutes later - right around when the probe that needs its strike count arrives and reads nothing.
+  - Even while the record survived, it was only adopted when it was *still blocking*. A stage that had lapsed was discarded the moment it mattered, so the process that reached the probe started from zero strikes and opened another first stage.
+
+  Every challenge therefore counted as the first one and the short stage restarted forever - exactly the wasted probe the gate was built to stop. The record now outlives the longest stage by a margin, and a shared record is adopted for its **recency** rather than for whether it is currently blocking, so a lapsed stage still carries its strikes forward.
+
 ## 0.5.2 - 2026-10-04
 
 Two findings from running the local server against Torob for real, instead of against stubs.

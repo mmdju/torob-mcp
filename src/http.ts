@@ -131,6 +131,14 @@ function looksLikeChallenge(res: Response, body: string): boolean {
 const STAGE1_MS = 5 * 60_000;
 const STAGE2_MS = 30 * 60_000;
 const WALL_KEY = "wall";
+// The record's job is not just to hold the block - it is to carry the strike
+// count forward to whatever comes after the block. Tying its lifetime to the
+// stage defeated that: a first-stage record died after seven minutes, and a
+// probe arriving a little later read nothing, started from zero strikes, and
+// opened another first stage. Every challenge then looked like the first one,
+// which is exactly the wasted probe this gate exists to prevent. So it lives
+// comfortably past the longest stage.
+const WALL_TTL_SECONDS = Math.ceil(STAGE2_MS / 1000) + 600;
 
 interface WallState {
   /** When the gate reopens; 0 means it is open now. */
@@ -187,7 +195,11 @@ async function wallRemainingMs(): Promise<number> {
     // closed one is already the answer, and the check runs before every
     // upstream request.
     const shared = await storeGet<WallState>(WALL_KEY);
-    if (shared && typeof shared.until === "number" && shared.until > wall.until) {
+    // Adopt on *recency*, not on whether it is still blocking. A stage that has
+    // lapsed still carries the strikes, and a rule of `until` alone discarded it
+    // the moment it mattered - the probe after a stage then counted as a first
+    // challenge and restarted the short stage forever.
+    if (shared && typeof shared.until === "number" && typeof shared.openedAt === "number" && shared.openedAt > wall.openedAt) {
       wall = shared;
     }
   }
@@ -208,7 +220,7 @@ async function openWall(): Promise<void> {
   const strikes = wall.strikes + 1;
   const ms = strikes <= 1 ? STAGE1_MS : STAGE2_MS;
   wall = { until: now + ms, openedAt: now, strikes };
-  await storeSet(WALL_KEY, wall, Math.ceil(ms / 1000) + 120);
+  await storeSet(WALL_KEY, wall, WALL_TTL_SECONDS);
 }
 
 async function closeWallIfEarned(startedAt: number): Promise<void> {

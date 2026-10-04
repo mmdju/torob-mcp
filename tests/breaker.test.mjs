@@ -11,6 +11,7 @@ import { test, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { breakerRemainingMs, expireWallForTests, forgetLocalWallForTests, resetBreakerForTests, setPaceForTests, setRetryDelayForTests } from "../dist/http.js";
 import { installFileStore, uninstallFileStore } from "../dist/store-node.js";
+import { setStoreBackend } from "../dist/store.js";
 import { TOOLS } from "../dist/tools.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -152,6 +153,54 @@ test("a repeat challenge earns the long stage instead of the short one", async (
   const stageTwo = breakerRemainingMs();
   assert.ok(stageTwo > stageOne, "a repeat challenge must not get the short stage again");
   assert.ok(stageTwo <= 30 * 60_000, "but it stays bounded");
+});
+
+test("a lapsed stage still carries its strike forward to whatever runs next", async () => {
+  // Measured on the live service 2026-10-04: the gate kept answering "retry in
+  // about 3 minute(s)" long after a first challenge - it was restarting the
+  // short stage every time, because the process that reached the probe had no
+  // memory of the strike. That is the wasted probe this gate exists to prevent.
+  await assert.rejects(() => run("search_products", { query: "strike-a" }));
+  assert.ok(breakerRemainingMs() > 0, "the first challenge closes the gate");
+
+  // The stage runs out on its own, and this is no longer the process that saw
+  // it: the local view is empty and only the store remembers.
+  await expireWallForTests();
+  forgetLocalWallForTests();
+  assert.equal(breakerRemainingMs(), 0, "the gate is open, so the probe goes through");
+
+  await assert.rejects(() => run("search_products", { query: "strike-b" }));
+  assert.ok(
+    breakerRemainingMs() > 5 * 60_000,
+    `a repeat challenge must earn the long stage, not restart the short one (got ${breakerRemainingMs()}ms)`
+  );
+});
+
+test("the record of a challenge outlives the stage it describes", async () => {
+  // The other half of the same bug: the stored record carried a lifetime tied
+  // to its own stage, so a first-stage record was gone seven minutes later -
+  // by which time the probe that needs its strike count arrives and reads
+  // nothing. A record that cannot be read cannot escalate anything.
+  const writes = [];
+  setStoreBackend({
+    get: async () => undefined,
+    set: async (key, _value, ttl) => {
+      writes.push({ key, ttl });
+    },
+  });
+  try {
+    await assert.rejects(() => run("search_products", { query: "ttl-probe" }));
+    const wall = writes.find((w) => w.key === "wall");
+    assert.ok(wall, "a challenge must be written to the store");
+    assert.ok(
+      wall.ttl > (30 * 60_000) / 1000,
+      `the record must outlive the longest stage; got ${wall.ttl}s`
+    );
+  } finally {
+    // Put the real file backend back exactly as `before` left it.
+    uninstallFileStore();
+    installFileStore({ dir: storeDir });
+  }
 });
 
 test("an answer that is not a challenge reopens the gate", async () => {
