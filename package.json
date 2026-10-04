@@ -1,7 +1,7 @@
 {
   "name": "torob-mcp",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.4.1",
   "license": "MIT",
   "description": "MCP server for Torob (Iran's price-comparison engine): search, compare and price-check across shops. Read-only, no API key.",
   "keywords": [
@@ -25,7 +25,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
-    "fa-text-utils": "github:mmdju/fa-text-utils#v1.0.0"
+    "fa-text-utils": "git+https://github.com/mmdju/fa-text-utils.git#v1.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

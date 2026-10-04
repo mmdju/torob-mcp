@@ -9,7 +9,7 @@ import { UpstreamError } from "./http.js";
 import { setWaitUntil, type WaitUntil } from "./project.js";
 import { READ_ONLY, TOOLS } from "./tools.js";
 
-export const VERSION = "0.4.0";
+export const VERSION = "0.4.1";
 
 // Server-level guidance: cheaper than repeating it in every tool description,
 // and it steers the agent before it picks a tool at all. It is the first thing

@@ -1,0 +1,26 @@
+name: Test
+
+# The unit suite is what stands between a change and a bad answer reaching the
+# hosted service: it builds the TypeScript and runs every test in tests/, with
+# Torob stubbed, so it never touches the live API. Keeping it on push and pull
+# request (rather than joining verify.yml's hourly schedule) also keeps CI out
+# of Torob's rate window - that schedule is for the endpoint, this one is for
+# the code.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # `npm ci` from the lockfile: the one dependency that is not on the npm
+      # registry is fetched over https, so no deploy key is needed here.
+      - run: npm ci
+      - run: npm test

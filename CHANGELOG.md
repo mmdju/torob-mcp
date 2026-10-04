@@ -2,12 +2,40 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
-## Unreleased
+## 0.4.1 - 2026-10-04
+
+Answers that were wrong, and promises the docs made that the code did not keep. Everything below is on the hosted service as of this release.
 
 ### Fixed
 
 - **`brand` sends the brand id Torob filters on, not its slug.** Torob ignores a slug or display name and answers unfiltered, so a filtered search used to come back as a full list that read as the answer. `available_filters` and `brand_values` now carry the id as `value` with the slug beside it to recognise the brand by, and a name or slug from an earlier answer is mapped onto the id.
 - **A different brand or city is a different search.** The response cache left both out of its key, so a repeat search with the same words and a different brand or city came back from the first search's cache.
+- **`find_best_value` names the real cheapest, and stops contradicting itself.** With nothing under budget it also sent the search's "Nothing matched" note - two answers that disagree in one response - and it called the *first* row in relevance order "the cheapest in stock". It now reports the actual cheapest and only says "nothing matched" when the search really matched nothing.
+- **A torob.com product URL opens `price_history` and `similar_products` too.** Both refused an id the moment there was no memory of it, while `product_details` opened the same id through its last-resort lookup. They share that path now, so the documented input ("a prk from a card, or a torob.com product URL") works on all of them.
+- **A product's name is remembered even when its URL is not**, and the name now actually drives a search. That rung of the resolution ladder was unreachable - no query was ever issued from it - so `resolved_by: exact-id` and `name-search` could not be reported at all, and a URL that stopped parsing left the id with no way back.
+- **A brand wording the search cannot map is refused with the brands it does offer.** A word Torob ignores was sent anyway and the narrowing silently did not happen. A brand passed inside `filters` is taken over by the `brand` argument instead of being echoed back as an applied filter.
+- **The filter groups a brand-bearing search teaches are read back.** The memory was written with the brand in its key and read without it, so a brand search never warmed the path that validates filters before spending a request.
+- **An id-only answer for another product is never remembered as this one.** The probe's payload was cached under the id it was probed with *before* the id in it was checked, so a mismatched answer could be served later through the `details_url` path.
+- **A 404 is reported at once.** The 4xx fast-fail threw inside the retry's own `try`, so it was retried anyway - four round trips and twelve seconds for a product that does not exist.
+- **Lists that cannot be read are errors, not empty answers.** Rows whose fields this server does not recognise used to be dropped one by one until the result was `[]`, which reads as "there are no cities".
+- **The caller's `details_url` is used before this server's own memory**, and a URL naming a *different* product than the `prk` is refused instead of opened: the `prk` is what the question is about.
+
+### Changed
+
+- **`search_products` and `search_by_image` cap `limit` at 24.** Upstream returns 24-26 cards a page whatever size is asked, so 30 was a promise the page could not keep.
+- **A clamped page says so on all four paged tools.** `find_shops`, `search_by_image` and the `shop_profile` catalogue stop at 20 pages and used to clamp silently; the note now names the real maximum.
+- **Provinces come back whole.** The default limit was 30 and Iran has 31, so the last province was dropped while the answer reported 30. Cities keep the smaller default, and a cut city list carries `total`, `truncated` and a `note`.
+- **Numbers typed in Persian or Arabic-Indic digits are read**: `limit: ۱۰` is 10 instead of silently falling back to the default.
+- **`browse_categories` says a full page means "possibly more"** - upstream sends no total - and no longer tells a caller to raise a limit already at its maximum.
+
+### Documentation and tooling
+
+- **`scripts/verify-live.mjs` takes its gap in seconds in either position**, so the command the architecture doc shows (`node scripts/verify-live.mjs 5`) runs instead of being read as a host name.
+- **CI runs the unit suite on every push** (`.github/workflows/test.yml`). The `fa-text-utils` dependency now resolves over https, so a fresh clone and a runner both need no SSH key.
+- **`SECURITY.md` says what is actually stored and how arguments are actually checked**: it no longer claims "nothing is persisted" beside its own Durable Object, nor that every argument is validated against a closed schema.
+- **README fixes**: the red badge no longer claims to mean "the deployment drifted", the dependency count, the rate-limit wording, and - in the Persian README - a mistranslated bullet and a missing link to `docs/card.d.ts`.
+- **`examples/python.py` reports tool errors as sentences** (they are not JSON), explains a 429 with its `retry-after`, and passes the card's `details_url` to `product_details`.
+- **`docs/card.d.ts` carries every field the tools emit**, including the truncation signals and the shapes of a partial compare row and a failed delivery lookup.
 
 ## 0.4.0 - 2026-10-01
 
