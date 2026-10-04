@@ -23,9 +23,10 @@
 // `npm start`). Both are weaker than the object and never fatal - the object is
 // tried first, and any failure falls through to them.
 
-// Twenty calls a minute is far above a real conversation - a whole sweep of the
-// tools, one call at a time with a pause between, is about four - and low enough
-// that a script scraping prices through this service has to wait it out.
+// Twenty calls a minute is far above a real conversation - the fourteen tools
+// take fourteen calls, plus the product and shop lookups a conversation leads
+// to - and low enough that a script scraping prices through this service has to
+// wait it out.
 export const RATE_LIMIT_MAX = 20;
 export const RATE_LIMIT_WINDOW_MS = 60_000;
 

@@ -246,11 +246,19 @@ test("browse_categories needs a starting id and says which one", async () => {
 test("list_locations returns provinces when no province is given", async () => {
   // Live shape: {count, next, previous, results:[{id, name}]} - the field is
   // `name`, not `title`. Guessing `title` returned an empty list that looked
-  // like "Iran has no provinces".
-  stub(() => ({ count: 31, next: null, previous: null, results: [{ id: 1, name: "آذربایجان شرقی" }, { id: 8, name: "تهران" }] }));
+  // like "Iran has no provinces". The full 31, because the default limit used
+  // to be 30: the last one was dropped and the answer reported count: 30, so
+  // nothing in the response said one was missing.
+  const results = [{ id: 1, name: "آذربایجان شرقی" }].concat(
+    Array.from({ length: 30 }, (_, i) => ({ id: i + 2, name: `استان ${i + 2}` }))
+  );
+  stub(() => ({ count: 31, next: null, previous: null, results }));
   const out = await run("list_locations", {});
   assert.equal(out.mode, "provinces");
   assert.equal(out.provinces[0].name, "آذربایجان شرقی");
+  assert.equal(out.provinces.length, 31, "all 31 provinces fit the default, so none is dropped");
+  assert.equal(out.count, 31);
+  assert.equal(out.truncated, undefined);
 });
 
 test("list_locations returns a province's cities with a search term", async () => {
@@ -290,10 +298,18 @@ test("special_offers returns the featured banners, clearly not shop data", async
 });
 
 test("a wrong field name is a failure, not an empty answer", async () => {
-  // The bug this guards: an endpoint that answers 200 with an unexpected shape
-  // produced `[]` and read as "Torob has no provinces". The projection must
-  // report nothing only when there is nothing. Uses a city search (its own
-  // cache key) so it cannot shadow the province list cached above.
+  // The bug this guards: rows whose fields this server does not recognise are
+  // all dropped, and `[]` reads as "there are no cities" - the wrong answer in
+  // the direction a caller acts on (measured: `title` against `name` on the
+  // location endpoints). Uses a city search (its own cache key) so it cannot
+  // shadow the province list cached above.
+  stub(() => ({ count: 2, results: [{ wrong_field: 1 }, { wrong_field: 2 }] }));
+  await assert.rejects(() => run("list_locations", { search: "شکل-خراب" }), /could not read/);
+});
+
+test("a city search that matches nothing reports an empty list", async () => {
+  // Nothing found is a different answer from nothing readable, and only the
+  // first one may be an empty list.
   stub(() => ({ count: 0, results: [] }));
   const out = await run("list_locations", { search: "ناموجود" });
   assert.deepEqual(out.cities, []);
@@ -403,4 +419,62 @@ test("an unknown brand value is still passed through unchecked", async () => {
   await run("search_products", { query: "روتر برند-ناشناس", category: "1248" });
   await run("search_products", { query: "روتر برند-ناشناس", category: "1248", brand: "99999" });
   assert.equal(brandSent(seen.at(-1)), "99999");
+});
+
+test("a brand wording the search cannot map is refused with the brands it does offer", async () => {
+  // A word that maps to nothing upstream is ignored, so sending it would return
+  // every brand's product under a brand filter that was never applied. An id is
+  // still accepted as given (the preview may not list it) - a word cannot be.
+  stub(() => routerPayload);
+  await run("search_products", { query: "روتر برند-بی‌معنا", category: "1248" });
+  await assert.rejects(
+    () => run("search_products", { query: "روتر برند-بی‌معنا", category: "1248", brand: "برند-غیر معین" }),
+    /is not a brand this search offers/
+  );
+  await assert.rejects(
+    () => run("search_products", { query: "روتر برند-بی‌معنا", category: "1248", brand: "برند-غیر معین" }),
+    /17418/
+  );
+});
+
+test("a brand inside filters takes the brand path instead of being reported as applied", async () => {
+  // `brand` compiles to its own upstream parameter. Echoing it back inside
+  // filters_applied claimed a filter had been applied when only the brand
+  // argument ever reached upstream.
+  const seen = [];
+  stub((url) => {
+    seen.push(url);
+    return routerPayload;
+  });
+  const out = await run("search_products", {
+    query: "روتر برند-داخل-فیلتر",
+    category: "1248",
+    filters: { brand: "17418" },
+  });
+  assert.equal(brandSent(seen.at(-1)), "17418");
+  assert.equal(out.filters_applied, undefined, "the brand is its own argument, not an applied filter");
+});
+
+test("a search that carried a brand still teaches this query its filters", async () => {
+  // The filter memory is keyed on the query and its category/city/shop type.
+  // It used to include the brand as well, while its reader did not - so every
+  // brand-bearing search wrote an entry nothing could read back, and the next
+  // call paid for a search that a remembered group would have refused first.
+  let fetches = 0;
+  stub(() => {
+    fetches += 1;
+    return storagePayload;
+  });
+  await run("search_products", {
+    query: "روتر-حافظه-برند-آزمون",
+    category: "1248",
+    brand: "17418",
+    filters: { storage: "1 tb" },
+  });
+  const afterWarm = fetches;
+  await assert.rejects(
+    () => run("search_products", { query: "روتر-حافظه-برند-آزمون", category: "1248", filters: { storage: "9 tb" } }),
+    /not a value 'storage' accepts/
+  );
+  assert.equal(fetches, afterWarm, "the refusal must come from memory, before an upstream request");
 });

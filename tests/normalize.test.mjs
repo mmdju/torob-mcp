@@ -129,3 +129,23 @@ test("pageClampNote explains a silent clamp", () => {
   assert.equal(note.page_requested, 999);
   assert.match(String(note.page_note), /50/);
 });
+
+test("numbers typed with Persian or Arabic-Indic digits are read as numbers", () => {
+  // An Iranian user types ۱۰. Read as text it parsed to nothing and fell back
+  // to the default, so the caller's own number was dropped without a word.
+  assert.equal(num("۱۰", 0), 10);
+  assert.equal(num("٥", 0), 5);
+  assert.equal(clampLimit("۲۵", 10, 30), 25);
+  assert.equal(clampLimit("۲۵", 10, 24), 24, "the cap still applies to a Persian-digit input");
+  assert.equal(clampPage("۳"), 3);
+});
+
+test("pageClampNote reports the maximum that was actually applied", () => {
+  // Three of the pagers stop at 20, not at the shared default of 50, so the
+  // note has to name the real ceiling rather than the documented one.
+  assert.deepEqual(pageClampNote(20, 20), {});
+  const note = pageClampNote(21, 20);
+  assert.equal(note.page_clamped, true);
+  assert.equal(note.page_requested, 21);
+  assert.match(String(note.page_note), /20/);
+});

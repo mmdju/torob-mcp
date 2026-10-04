@@ -136,6 +136,18 @@ test("find_shops says so when nothing matches", async () => {
   assert.match(out.note, /No shop matched/);
 });
 
+test("a page past the directory's own maximum says it was clamped", async () => {
+  // This pager stops at 20 while the shared convention promises 50. Clamped
+  // silently, page 21 came back as page 20 with nothing to say so - an agent
+  // would quote the wrong page as fact.
+  stub(() => ({ count: 11124, results: [{ id: 494303, name: "موبایل رضا", shop_type: "offline", city: "تبریز" }], next: "" }));
+  const out = await run("find_shops", { query: "موبایل", page: 21 });
+  assert.equal(out.page, 20);
+  assert.equal(out.page_clamped, true);
+  assert.equal(out.page_requested, 21);
+  assert.match(String(out.page_note), /20/);
+});
+
 test("search_by_image sends the link to Torob and keeps what it recognised", async () => {
   const seen = [];
   stub((url) => {

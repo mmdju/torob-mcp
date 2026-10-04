@@ -34,7 +34,11 @@ export function str(v: unknown, fallback = ""): string {
 }
 
 export function num(v: unknown, fallback: number): number {
-  const n = typeof v === "number" ? v : parseFloat(str(v));
+  // Persian and Arabic-Indic digits are how an Iranian user types a number:
+  // `limit: ۱۰` has to mean 10. Read as-is it parsed to NaN and fell back to
+  // the default, so the caller's own number was silently dropped.
+  const text = str(v).replace(/[۰-۹٠-٩]/g, (d) => DIGIT_MAP[d] ?? d);
+  const n = typeof v === "number" ? v : parseFloat(text);
   return Number.isFinite(n) ? n : fallback;
 }
 

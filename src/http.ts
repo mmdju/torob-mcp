@@ -124,6 +124,12 @@ export async function torobGet<T = unknown>(path: string, opts?: { retries?: num
     await pace();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    // Set when this attempt's answer is the caller's problem rather than a blip
+    // - a 4xx. The `throw` below happens inside this same `try`, so without the
+    // flag the catch would treat it as a retryable failure and spend the whole
+    // retry budget on an answer that will not change (measured: a 404 costing
+    // four round trips and twelve seconds).
+    let fatal = false;
     try {
       const res = await fetch(url, {
         headers: {
@@ -154,7 +160,10 @@ export async function torobGet<T = unknown>(path: string, opts?: { retries?: num
         );
         // 4xx is the caller's fault, not a blip: 404 for a deleted product must
         // not be retried three times, and other 4xx are the same class.
-        if (res.status < 500 && res.status !== 429) throw lastError;
+        if (res.status < 500 && res.status !== 429) {
+          fatal = true;
+          throw lastError;
+        }
         if (attempt < retries) {
           await sleep(retryDelay(attempt));
           continue;
@@ -172,6 +181,7 @@ export async function torobGet<T = unknown>(path: string, opts?: { retries?: num
         );
       }
     } catch (err) {
+      if (fatal) throw err;
       if (err instanceof UpstreamError && (err.kind === "challenged" || err.kind === "usage")) throw err;
       lastError = err;
       if (attempt < retries) {

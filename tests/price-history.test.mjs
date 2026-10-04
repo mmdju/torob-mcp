@@ -154,8 +154,9 @@ test("price_history says so when Torob charts nothing yet", async () => {
 });
 
 test("price_history asks for a search first when the id is unknown", async () => {
-  // Nothing remembered, no details_url, and a name search that finds nothing:
-  // the honest answer names the way back to the product.
+  // Nothing remembered (so no name to search by), no details_url, and an
+  // id-only answer that does not check out: the honest answer names the way
+  // back to the product.
   stub(() => ({ results: [], count: 0, next: "" }));
   await assert.rejects(
     () => run("price_history", { prk: "00000000-0000-0000-0000-000000000000" }),
@@ -165,4 +166,32 @@ test("price_history asks for a search first when the id is unknown", async () =>
 
 test("price_history needs a prk", async () => {
   await assert.rejects(() => run("price_history", { prk: "  " }), /needs a prk/);
+});
+
+test("price_history opens an id this server has never seen, the way product_details does", async () => {
+  // The documented input is "a prk from a card, or a torob.com product URL" -
+  // the same wording product_details has. Without a details_url the id-only
+  // details call is the way in, and it used to be missing here: the very same
+  // id opened one tool and was refused by three others.
+  const product = fresh();
+  const seen = [];
+  stub((url) => {
+    seen.push(url);
+    if (url.includes("price-chart")) return chartPayload;
+    if (url.includes("last-modified-date")) return { last_modified_date: "2026-09-30T20:33:05.645676+00:00" };
+    if (url.includes("/details/")) {
+      return { random_key: product.id, name1: "هدفون بی‌سیم", price: 1000, price_text: "۱٫۰۰۰ تومان" };
+    }
+    return { labels: [], dataSets: [] };
+  });
+  const out = await run("price_history", { prk: product.id });
+  assert.equal(out.series.length, 2);
+  assert.ok(
+    seen.some((u) => u.includes("/details/?prk=")),
+    "the id-only details call is what opened it"
+  );
+  assert.ok(
+    !seen.some((u) => u.includes("base-product/search")),
+    "an id this server never saw has no name to search by, so no search is attempted"
+  );
 });

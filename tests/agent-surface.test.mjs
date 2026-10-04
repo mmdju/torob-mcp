@@ -69,10 +69,32 @@ test("every filter slug the instructions promise is one the server accepts", () 
 test("every response field the instructions promise really exists", () => {
   // The instruction "price_toman 0 means out of stock" is a promise about the
   // output shape. If the field were renamed the sentence would quietly become
-  // a lie that the agent acts on.
-  const shapes = readFileSync(new URL("../src/project.ts", import.meta.url), "utf8");
-  for (const field of ["price_toman", "available", "price_unreliable"]) {
-    assert.ok(shapes.includes(field), `instructions promise '${field}' but project.ts never emits it`);
+  // a lie that the agent acts on - so every field the instructions name as an
+  // answer is checked against the two files that build the answers, not a
+  // hand-picked three of them.
+  const shapes = ["../src/project.ts", "../src/tools.ts"]
+    .map((p) => readFileSync(new URL(p, import.meta.url), "utf8"))
+    .join("\n");
+  const promised = [
+    "price_toman",
+    "price_unreliable",
+    "available",
+    "available_filters",
+    "suggested_categories",
+    "details_url",
+    "total_matches",
+    "has_next_page",
+    "resolved_by",
+    "in_person_sellers",
+    "last_price_change_date",
+    "price_range_toman",
+    "matched_product",
+    "shop_id",
+    "prk",
+    "offers",
+  ];
+  for (const field of promised) {
+    assert.ok(shapes.includes(field), `instructions promise '${field}' but neither project.ts nor tools.ts has it`);
   }
 });
 
@@ -81,13 +103,16 @@ test("every tool declares itself read-only", () => {
   assert.equal(READ_ONLY.destructiveHint, false);
 });
 
-test("every tool has a title, a description and a closed input schema", () => {
+test("every tool has a title, a description, and a schema the server closes", () => {
+  // The closure itself is added at list time, so it cannot be asserted on the
+  // stored schema - but the line that adds it can, and it is the difference
+  // between "we advertise a closed schema" and "we do".
+  const server = readFileSync(new URL("../src/server.ts", import.meta.url), "utf8");
+  assert.match(server, /additionalProperties:\s*false/, "the list handler must close every schema it advertises");
   for (const tool of TOOLS) {
     assert.ok(tool.title, `${tool.name} has no title`);
     assert.ok(tool.description.length > 40, `${tool.name} has a too-thin description`);
     assert.equal(tool.inputSchema.type, "object");
-    // The server adds additionalProperties:false at list time; the schema must
-    // at least declare its properties and any required keys.
     assert.ok(tool.inputSchema.properties, `${tool.name} has no properties`);
     for (const required of tool.inputSchema.required ?? []) {
       assert.ok(required in tool.inputSchema.properties, `${tool.name} requires '${required}' but does not declare it`);

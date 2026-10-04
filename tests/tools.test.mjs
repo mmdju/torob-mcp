@@ -281,11 +281,44 @@ test("a cold compare reports each miss in its own row without runaway lookups", 
 });
 
 test("find_best_value can read postage for the cheapest picks", async () => {
-  stub((url) => (url.includes("/details/") ? detailsPayload : searchPayload));
-  const out = await run("find_best_value", { query: "ایفون", budget_toman: 60000000, include_delivery: true });
+  // Postage lives on the seller list, not on the card, so the delivered price
+  // only differs from the sticker price when the fixture actually states one -
+  // without it this test would pass whether or not the postage was read. Its
+  // own product id, because the details response is cached per process and a
+  // shared id would hand back an earlier test's payload.
+  const id = "2f6e4d3c-8b7a-4951-9c0d-1e2f3a4b5c6d";
+  const search = {
+    ...searchPayload,
+    results: [
+      {
+        ...searchPayload.results[0],
+        random_key: id,
+        more_info_url: `https://api.torob.com/v4/base-product/details/?search_id=s8&prk=${id}`,
+      },
+    ],
+    count: 1,
+  };
+  const paid = {
+    ...detailsPayload,
+    random_key: id,
+    products_info: {
+      ...detailsPayload.products_info,
+      result: [
+        { ...detailsPayload.products_info.result[0], postage_fee: "هزینه ارسال ۲۰٫۰۰۰ تومان" },
+        detailsPayload.products_info.result[1],
+      ],
+    },
+  };
+  stub((url) => (url.includes("/details/") ? paid : search));
+  const out = await run("find_best_value", { query: "پستیژ-آزمون-یک", budget_toman: 60000000, include_delivery: true });
   assert.equal(out.delivered.length, 1);
-  assert.equal(out.delivered[0].prk, "prk-aaa");
+  assert.equal(out.delivered[0].prk, id);
   assert.equal(out.delivered[0].cheapest_delivered_offer.price_toman, 50000000);
+  assert.equal(
+    out.delivered[0].cheapest_delivered_offer.delivered_price_toman,
+    50020000,
+    "the stated postage is added, so the delivered price is not the sticker price"
+  );
   assert.match(out.delivery_note, /postage/i);
 });
 
@@ -388,11 +421,13 @@ test("a different brand is a different search, not a cache hit", async () => {
     seen.push(url);
     return searchPayload;
   });
-  await run("search_products", { query: "کلید-برند-یک", brand: "apple" });
-  await run("search_products", { query: "کلید-برند-یک", brand: "samsung" });
+  // Brands travel as ids: a word is refused unless the search's own brand group
+  // maps it, so these are two ids the way a caller would really send them.
+  await run("search_products", { query: "کلید-برند-یک", brand: "5" });
+  await run("search_products", { query: "کلید-برند-یک", brand: "10" });
   assert.equal(seen.length, 2, "the second brand must reach upstream");
-  assert.match(seen[0], /brand=apple/);
-  assert.match(seen[1], /brand=samsung/);
+  assert.match(seen[0], /brand=5(&|$)/);
+  assert.match(seen[1], /brand=10(&|$)/);
 });
 
 test("a different city is a different search, not a cache hit", async () => {
@@ -414,7 +449,91 @@ test("the same brand and city still share one cache entry", async () => {
     calls += 1;
     return searchPayload;
   });
-  await run("search_products", { query: "کلید-یکسان", brand: "apple", city: "1" });
-  await run("search_products", { query: "کلید-یکسان", brand: "apple", city: "1" });
+  await run("search_products", { query: "کلید-یکسان", brand: "5", city: "1" });
+  await run("search_products", { query: "کلید-یکسان", brand: "5", city: "1" });
   assert.equal(calls, 1);
+});
+
+// ------------------------------------------------------------------ regressions
+
+test("a budget nothing fits explains the budget, not an empty market", async () => {
+  // Two in-stock results, dearest first in relevance order. The note used to
+  // borrow the search's "Nothing matched" wording - two contradicting answers
+  // in one response - and to name the *first* row as the cheapest.
+  const payload = {
+    ...searchPayload,
+    results: [
+      { ...searchPayload.results[0], random_key: "prk-b1", price: 80000000, price_text: "۸۰٫۰۰۰٫۰۰۰ تومان" },
+      { ...searchPayload.results[0], random_key: "prk-b2", price: 50000000, price_text: "۵۰٫۰۰۰٫۰۰۰ تومان" },
+    ],
+    count: 2,
+  };
+  stub((url) => (url.includes("suggestion2") ? [{ text: "پیشنهاد ترب" }] : payload));
+  const out = await run("find_best_value", { query: "بودجه-آزمون-خالی", budget_toman: 1000 });
+  assert.equal(out.matches_in_budget, 0);
+  assert.equal(
+    out.query_note,
+    undefined,
+    "the search matched - 'Nothing matched' would contradict the budget_note in the same answer"
+  );
+  assert.match(out.budget_note, /۵۰٫۰۰۰٫۰۰۰ تومان/, "the cheapest in stock, not the first row in relevance order");
+  assert.doesNotMatch(out.budget_note, /۸۰٫۰۰۰٫۰۰۰/);
+});
+
+test("product_details re-finds an id through the name it was learned under", async () => {
+  // A row whose details URL does not parse leaves the id with no address, but
+  // the name is still remembered - and a name is searchable, unlike the id. The
+  // name-search rung used to take no step at all, so the id fell through to the
+  // id-only probe or to an error.
+  const id = "7f3a9c11-2b4d-4e6f-8a90-1c2d3e4f5a6b";
+  const broken = {
+    ...searchPayload.results[0],
+    random_key: id,
+    name1: "هدفون بی‌سیم X200",
+    more_info_url: "https://example.invalid/v4/base-product/details/?prk=" + id,
+  };
+  const fixed = { ...broken, more_info_url: `https://api.torob.com/v4/base-product/details/?search_id=s9&prk=${id}` };
+  const seen = [];
+  let seeded = false;
+  stub((url) => {
+    seen.push(url);
+    if (url.includes("base-product/search")) {
+      const row = seeded ? fixed : broken;
+      seeded = true;
+      return { ...searchPayload, results: [row] };
+    }
+    if (url.includes("/details/")) return { ...detailsPayload, random_key: id, name1: "هدفون بی‌سیم X200" };
+    return { results: [], count: 0, next: "" };
+  });
+  await run("search_products", { query: "کلید-نام-یک" });
+  const out = await run("product_details", { prk: id });
+  assert.equal(out.resolved_by, "exact-id", "found by searching the remembered name, then matched on the id");
+  assert.equal(
+    seen.filter((u) => u.includes("base-product/search")).length,
+    2,
+    "one search seeded the memory, one searched for the name"
+  );
+});
+
+test("an id-only answer for another product is never remembered as this one", async () => {
+  // The id-only probe is the one call that can be answered by a different
+  // product. Caching that answer under the probed id would serve it later
+  // through the details_url path - a wrong product at a wrong price.
+  const id = "5d4c3b2a-1908-4716-2535-464738394041";
+  let mismatch = true;
+  stub((url) => {
+    if (url.includes("/details/")) {
+      return mismatch
+        ? { ...detailsPayload, random_key: "00000000-0000-4000-8000-999999999999", name1: "محصول دیگری" }
+        : { ...detailsPayload, random_key: id, name1: "گوشی ایفون ۱۳" };
+    }
+    return { results: [], count: 0, next: "" };
+  });
+  await assert.rejects(() => run("product_details", { prk: id }), /search_products/);
+  mismatch = false;
+  const out = await run("product_details", {
+    prk: id,
+    details_url: `https://api.torob.com/v4/base-product/details/?search_id=s7&prk=${id}`,
+  });
+  assert.equal(out.name_fa, "گوشی ایفون ۱۳", "the mismatched answer from the probe must not come back from cache");
 });

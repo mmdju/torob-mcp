@@ -19,11 +19,15 @@ async function main() {
     // Stateless: every POST is self-contained. The SDK requires a fresh
     // transport (and therefore a fresh Server) per request.
     const http = createServer((req, res) => {
-      if (req.method === "OPTIONS" && req.url === "/mcp") {
+      // req.url carries any query string ("/mcp?x=1"), while the Worker routes
+      // on pathname. Matching the raw string made one runtime answer and the
+      // other 404 the very same request.
+      const path = (req.url ?? "").split("?")[0];
+      if (req.method === "OPTIONS" && path === "/mcp") {
         res.writeHead(204, { ...CORS_HEADERS, "access-control-max-age": "86400" }).end();
         return;
       }
-      if (req.method === "POST" && req.url === "/mcp") {
+      if (req.method === "POST" && path === "/mcp") {
         res.setHeader("access-control-allow-origin", CORS_HEADERS["access-control-allow-origin"]);
         res.setHeader("access-control-expose-headers", CORS_HEADERS["access-control-expose-headers"]);
         let body = "";
@@ -64,15 +68,15 @@ async function main() {
             try { await reqServer.close(); } catch { /* ignore */ }
           }
         });
-      } else if (req.method === "GET" && req.url === "/mcp") {
+      } else if (req.method === "GET" && path === "/mcp") {
         // Same page the Worker serves: a browser client that GETs the endpoint
         // gets an explanation, not a 404.
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(MCP_PAGE);
-      } else if (req.method === "GET" && req.url === "/health") {
+      } else if (req.method === "GET" && path === "/health") {
         res
           .writeHead(200, { "content-type": "application/json" })
           .end(JSON.stringify({ ok: true, service: "torob-mcp", version: VERSION }));
-      } else if (req.method === "GET" && (req.url === "/" || req.url === "")) {
+      } else if (req.method === "GET" && (path === "/" || path === "")) {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(LANDING);
       } else {
         res.writeHead(404).end("Not found. POST /mcp for MCP, GET /health for health.");

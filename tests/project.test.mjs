@@ -137,6 +137,15 @@ test("a shop score is passed through even when the vote count is zero", () => {
   assert.equal(one.shop_score, 5);
   assert.equal(one.shop_votes, 1);
 
+  // The measured case itself: a perfect score with no votes behind it. A vote
+  // floor would have nulled this one out, hiding the only signal there is.
+  const noVotes = offersOf({
+    ...searchRow,
+    products_info: { result: [{ shop_name: "بدون رأی", price: 1000, availability: true, shop_score: 5, shop_votes_count: 0 }] },
+  });
+  assert.equal(noVotes[0].shop_score, 5, "the score travels as Torob sent it, even at zero votes");
+  assert.equal(noVotes[0].shop_votes, 0);
+
   // A shop with no score at all gets none invented for it.
   const unscored = offersOf({
     ...searchRow,

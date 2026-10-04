@@ -159,7 +159,9 @@ export default {
       }
     }
     if (req.method === "GET" && url.pathname === "/mcp") {
-      return new Response(MCP_PAGE, { headers: { "content-type": "text/html; charset=utf-8" } });
+      // Same page, same CORS as the POST route: a browser client that probes
+      // the endpoint with GET has to be able to read the answer.
+      return withCors(new Response(MCP_PAGE, { headers: { "content-type": "text/html; charset=utf-8" } }));
     }
     if (req.method === "GET" && url.pathname === "/health") {
       // The version is part of health on purpose: the docs advertise the

@@ -20,6 +20,7 @@ import {
   type LookupBudget,
   type PriceChart,
   type ProductCard,
+  type SearchResult,
   canonicalSlug,
   categoryChildren,
   cities,
@@ -162,6 +163,46 @@ async function withSuggestions(query: string, found: ProductCard[]): Promise<Rec
   };
 }
 
+// A brand reaches upstream as an id or not at all: Torob ignores a slug or a
+// display name and answers unfiltered, and an unfiltered list read as a
+// filtered one is a wrong price answer - the same trap `validateFilters` guards
+// for every other filter. The brand group is always a preview (its full list
+// lives at `values_url`), so an id that is not in the preview cannot be called
+// wrong: it may be a real brand from that full list. A *word*, though, maps to
+// nothing here, and passing it on would silently drop the narrowing.
+// Returns the value to send; throws when the wording cannot be a value.
+function settleBrand(brand: string, found: SearchResult): string {
+  const group = found.available_filters.find((g) => g.type === "brand");
+  if (!group) {
+    // No brand group means this search has no brand dimension to narrow. An id
+    // is still the value upstream reads (the group is what *advertises* the
+    // dimension, not what makes the parameter work), so it passes; a word has
+    // nothing here to be mapped through, and sending it would return every
+    // brand's product as if the brand had been applied.
+    if (/^\d+$/.test(brand)) return brand;
+    throw usageError(
+      `This search offers no brand filter, so '${brand}' cannot narrow it. Drop the brand argument, or search ` +
+        `wording that has one.`
+    );
+  }
+  const seen = [...found.brand_values, ...(group.options ?? [])];
+  const byValue = seen.find((o) => o.value === brand);
+  if (byValue) return byValue.value;
+  const slug = canonicalSlug(brand);
+  const byWording = seen.find((o) => o.slug === slug || foldKey(o.name) === foldKey(brand));
+  if (byWording) return byWording.value;
+  if (/^\d+$/.test(brand)) return brand;
+  const shown = seen
+    .slice(0, 12)
+    .map((o) => (o.name && o.name !== o.value ? `${o.value} (${o.name})` : o.value))
+    .join(", ");
+  throw usageError(
+    `'${brand}' is not a brand this search offers. The brands it shows are: ${shown}` +
+      `${seen.length > 12 ? ", ..." : ""}. Pass one of those values, or a brand id from the group's ` +
+      `values_url (brand_values lists what fits in this answer).`
+  );
+}
+
 function sortOf(v: unknown): Sort {
   const s = str(v).trim() as Sort;
   return (SORTS as readonly string[]).includes(s) ? s : "popularity";
@@ -228,7 +269,10 @@ const searchTool: ToolDef = {
     const page = clampPage(args.page);
     const sort = sortOf(args.sort);
     const shopType = shopTypeOf(args.shop_type);
-    const limit = clampLimit(args.limit);
+    // Upstream hands back 24-26 cards whatever `size` is asked for, so 30 was a
+    // promise the page could not keep: a caller asking for 30 got 24 with no
+    // sign anything was short.
+    const limit = clampLimit(args.limit, 10, 24);
     const category = str(args.category).trim() || undefined;
     const city = str(args.city).trim() || undefined;
 
@@ -252,14 +296,21 @@ const searchTool: ToolDef = {
         if (slug) wanted[slug] = str(v).trim();
       }
     }
+    // `brand` compiles to its own upstream parameter, so a brand handed over in
+    // `filters` joins that path instead of being echoed back as a filter this
+    // search applied - which, until it has been settled below, it may not be.
+    const brandFromFilters = wanted.brand;
+    if (brandFromFilters !== undefined) delete wanted.brand;
+
+    const rememberedKey = filterMemoryKey(query, { category, city, shopType });
     // The loop this server promises: read available_filters, pass a value back.
     // When this exact query's filters were seen before, the check happens
-    // before any upstream call. Otherwise the search itself runs and its own
-    // response becomes the authority. Either way a filter that would be
-    // ignored upstream is refused instead of returning an unfiltered list.
+    // before any upstream call. Either way the fresh response is checked in
+    // full, because it is the only authority: a value a stale memory blessed
+    // but this search does not advertise would be ignored upstream.
     let checked: Record<string, string> | null = null;
     if (Object.keys(wanted).length) {
-      const remembered = await rememberedFilterGroups(filterMemoryKey(query, { category, city, shopType }));
+      const remembered = await rememberedFilterGroups(rememberedKey);
       if (remembered) checked = validateFilters(wanted, remembered, "canonicalize");
     }
     Object.assign(applied, checked ?? wanted);
@@ -267,10 +318,11 @@ const searchTool: ToolDef = {
     // A brand filter wants the brand's id, not its slug or the name people say
     // (measured: brand=17418 narrowed routers to MikroTik, brand=mikrotik-میکروتیک
     // changed nothing). Map a name or slug through the brand group when this
-    // query showed one; anything else goes upstream as given.
-    let brand = str(args.brand).trim() || undefined;
+    // query showed one; whatever is still not an id is settled against the
+    // fresh response below, where the brands this search really offers are known.
+    let brand = str(args.brand).trim() || brandFromFilters;
     if (brand) {
-      const groups = await rememberedFilterGroups(filterMemoryKey(query, { category, city, shopType }));
+      const groups = await rememberedFilterGroups(rememberedKey);
       const brandGroup = groups?.find((g) => g.type === "brand");
       const slug = canonicalSlug(brand);
       const matched = brandGroup?.options?.find(
@@ -279,23 +331,51 @@ const searchTool: ToolDef = {
       if (matched) brand = matched.value;
     }
 
-    const found = await searchProducts({
-      q: query,
-      page,
-      sort,
-      category,
-      brand,
-      city,
-      shopType,
-      filters: Object.keys(applied).length ? applied : undefined,
-    });
+    const runSearch = (brandId: string | undefined) =>
+      searchProducts({
+        q: query,
+        page,
+        sort,
+        category,
+        brand: brandId,
+        city,
+        shopType,
+        filters: Object.keys(applied).length ? applied : undefined,
+      });
 
-    if (Object.keys(wanted).length && !checked) {
-      // Cold path: the search has already run, so the response itself decides
-      // whether every value was real. A value that is not in the form the
-      // search advertised (a display name, say) is refused here rather than
-      // returned as if the filter had been applied.
-      Object.assign(applied, validateFilters(wanted, found.available_filters, "exact"));
+    const sentFilters = { ...applied };
+    let found = await runSearch(brand);
+    let rerun = false;
+
+    if (Object.keys(wanted).length) {
+      // The response that actually ran decides whether every value was real,
+      // and maps a wording onto the value upstream reads. When that differs
+      // from what this search was sent, the results above were fetched with a
+      // filter Torob ignored - an unfiltered list wearing a filtered answer -
+      // so they are searched again with the corrected values instead.
+      const fresh = validateFilters(checked ?? wanted, found.available_filters, "canonicalize");
+      for (const [slug, value] of Object.entries(fresh)) if (sentFilters[slug] !== value) rerun = true;
+      Object.assign(applied, fresh);
+    }
+
+    if (brand) {
+      const settled = settleBrand(brand, found);
+      if (settled !== brand) {
+        brand = settled;
+        rerun = true;
+      }
+    }
+
+    if (rerun) {
+      found = await runSearch(brand);
+      // The corrected run has to accept the same values: a brand narrows the
+      // search, and the groups can differ once it does. No third run - a value
+      // this response does not advertise is refused rather than re-searched,
+      // and these are already the canonical forms it advertised before.
+      if (Object.keys(wanted).length) {
+        const sent = Object.fromEntries(Object.keys(wanted).map((slug) => [slug, applied[slug]]));
+        Object.assign(applied, validateFilters(sent, found.available_filters, "exact"));
+      }
     }
 
     return {
@@ -632,6 +712,12 @@ const bestValueTool: ToolDef = {
     // otherwise - "best" without a budget is usually "most relevant that is in
     // stock", not "the cheapest thing with an unclear name".
     const ranked = budget !== null ? [...inBudget].sort((a, b) => (a.price_toman as number) - (b.price_toman as number)) : inBudget;
+    // "The cheapest in stock" has to mean the cheapest one. `buyable` keeps
+    // relevance order, so its first entry is the most relevant, not the dearest
+    // or the cheapest - only sorting says which is which.
+    const cheapestInStock = buyable.length
+      ? [...buyable].sort((a, b) => (a.price_toman as number) - (b.price_toman as number))[0]
+      : null;
 
     const output: Record<string, unknown> = {
       query,
@@ -649,8 +735,11 @@ const bestValueTool: ToolDef = {
               budget === null
                 ? "Nothing in these results is in stock right now."
                 : `Nothing in stock was found under ${budget.toLocaleString("en-US")} Toman. The cheapest in stock was ` +
-                  `${buyable.length ? buyable[0].price_text : "none available"}. Widen the search or raise the budget.`,
-            ...(await withSuggestions(query, [])),
+                  `${cheapestInStock ? cheapestInStock.price_text : "none available"}. Widen the search or raise the budget.`,
+            // Nothing was picked, but the search itself may have matched: only
+            // an empty result set earns the "Nothing matched" wording, or the
+            // answer would contradict its own budget_note in one response.
+            ...(await withSuggestions(query, found.products)),
           }
         : {}),
       attribution: found.attribution,
@@ -783,8 +872,18 @@ const categoriesTool: ToolDef = {
       parent_id: found.parent,
       count: found.categories.length,
       categories: found.categories,
+      // A full page means "possibly more", never "definitely more": upstream
+      // sends no total here, so a category with exactly `limit` children looks
+      // the same as one with twice as many. The note says which kind of answer
+      // it is, and does not tell anyone to raise a limit already at its max.
       ...(found.has_more
-        ? { has_more: true, note: "There are more children than shown; raise limit to see them all." }
+        ? {
+            has_more: true,
+            note:
+              limit < 30
+                ? "This page is full, so more children may exist - raise limit (max 30) to see them."
+                : "This page is full at the largest page this tool asks for (30); Torob may have sent only part of the children.",
+          }
         : {}),
       next: found.categories.length
         ? "Pass any child's id back as `id` to go one level deeper, or as `category` to search_products."
@@ -814,12 +913,21 @@ const locationsTool: ToolDef = {
   async run(args) {
     const provinceId = str(args.province_id).trim();
     const search = str(args.search).trim();
-    const limit = clampLimit(args.limit, 30, 200);
+    // Provinces are a fixed list of 31, and a default of 30 used to drop the
+    // last one while reporting the answer as complete. Cities run into
+    // thousands, so they keep the smaller default.
+    const limit = provinceId || search ? clampLimit(args.limit, 30, 200) : clampLimit(args.limit, 200, 200);
 
     if (!provinceId && search) {
       // A name with no province is still answerable: search every city.
       const found = await cities(undefined, search);
-      return { mode: "cities", search, count: Math.min(found.length, limit), cities: found.slice(0, limit) };
+      return {
+        mode: "cities",
+        search,
+        count: Math.min(found.length, limit),
+        cities: found.slice(0, limit),
+        ...(found.length > limit ? { total: found.length, truncated: true, note: `Showing ${limit} of ${found.length} - raise limit (max 200) for the rest.` } : {}),
+      };
     }
     if (!provinceId) {
       const found = await provinces();
@@ -846,6 +954,7 @@ const locationsTool: ToolDef = {
       ...(search ? { search } : {}),
       count: Math.min(found.length, limit),
       cities: found.slice(0, limit),
+      ...(found.length > limit ? { total: found.length, truncated: true, note: `Showing ${limit} of ${found.length} - raise limit (max 200) for the rest.` } : {}),
       next: "Pass a city id as `city` to search_products to see what is deliverable there.",
     };
   },
@@ -1012,6 +1121,10 @@ const shopProfileTool: ToolDef = {
               catalogue_note: `${found.page_count} cards were on this catalogue page; showing ${found.products.length}. Raise limit or page on.`,
             }
           : {}),
+        // This pager stops at 20 while the shared convention promises 50, so a
+        // clamped page has to say so here too - a silent clamp reads as an
+        // empty shelf at page 21.
+        ...(pageClampNote(args.page, 20)),
       };
     }
 
@@ -1065,6 +1178,9 @@ const findShopsTool: ToolDef = {
       ...(found.shops.length === 0
         ? { note: "No shop matched. Try a shorter name, or drop the city filter - the directory covers online and in-person sellers." }
         : { note: "A shop id is what shop_profile needs; this list is not a product list." }),
+      // The directory pages to SHOP_PAGE_MAX, not to the 50 the shared
+      // convention promises, so a clamped page says so.
+      ...(pageClampNote(args.page, SHOP_PAGE_MAX)),
     };
   },
 };
@@ -1091,13 +1207,16 @@ const searchByImageTool: ToolDef = {
     const imageUrl = str(args.image_url).trim();
     if (!imageUrl) throw usageError("search_by_image needs an image_url - a public link to the picture.");
     const page = clampPage(args.page, 20);
-    const limit = clampLimit(args.limit, 10, 30);
+    const limit = clampLimit(args.limit, 10, 24);
 
     const found = await searchByImage(imageUrl, page, limit);
     return {
       image_url: found.uploaded_image_url ?? imageUrl,
       page: found.page,
       has_next_page: found.has_next_page,
+      // Same as the shop directory: this pager stops at 20, so a clamped page
+      // has to say so rather than look like an empty page.
+      ...(pageClampNote(args.page, 20)),
       ...(found.matched_product ? { matched_product: found.matched_product } : {}),
       ...(found.detected_objects.length ? { detected_objects: found.detected_objects } : {}),
       products: found.products,

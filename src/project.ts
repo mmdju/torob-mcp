@@ -17,7 +17,7 @@
 //    gets a first-class shape rather than being flattened into a string.
 
 import { ATTRIBUTION, MIN_SHOP_VOTES, SORT_PARAMS, SOURCE, TOROB_API, TTL, type Sort } from "./config.js";
-import { cached } from "./cache.js";
+import { cacheSet as cachePut, cached, cachedGet } from "./cache.js";
 import { UpstreamError, torobGet } from "./http.js";
 import {
   availableFrom,
@@ -257,6 +257,19 @@ export function detailsUrlOf(v: unknown): string | null {
   return parsed.toString();
 }
 
+// The id inside a details URL, when the URL carries one. A caller passes a prk
+// and a details_url together, and the two have to name the same product: the
+// prk is what the question is about, so a URL that belongs to another id is
+// refused instead of being opened.
+function prkInUrl(url: string): string | null {
+  try {
+    const value = new URL(url).searchParams.get("prk");
+    return value ? value.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 export function toCard(row: RawProduct): ProductCard | null {
   const prk = str(row.random_key).trim();
   if (!prk) return null;
@@ -326,16 +339,19 @@ function rememberResolved(prk: string, url: string, name: string | null): void {
 
 function rememberDetailUrl(row: RawProduct): void {
   const prk = str(row.random_key).trim();
-  const url = detailsUrlOf(row.more_info_url);
-  if (!prk || !url) return;
+  if (!prk) return;
   const name = short(row.name1, 160);
-  rememberResolved(prk, url, name);
-  // The name is what lets a cold isolate re-resolve the id; the URL it came
-  // with is what makes that cost no upstream call at all. Both travel together
-  // through the per-colo cache, and only when there is a name: a nameless entry
-  // could not be re-found by a search anyway.
+  const url = detailsUrlOf(row.more_info_url);
+  // The name is remembered even when the URL is not usable, and that case is
+  // the whole reason the name search exists: a URL that stops parsing (an
+  // upstream shape change, a truncated link) leaves the id with no address, and
+  // the name is what lets a cold isolate search its way back to the row. Storing
+  // only when both were present made that rung unreachable - the id went
+  // straight to the id-only probe instead. An entry without a name could not be
+  // re-found by a search anyway, so the cache write still needs one.
+  rememberResolved(prk, url ?? "", name);
   if (name) {
-    keepAlive(cacheSet(prk, { name, url }, REMEMBERED_TTL_SECONDS));
+    keepAlive(cacheSet(prk, { name, ...(url ? { url } : {}) }, REMEMBERED_TTL_SECONDS));
   }
 }
 
@@ -894,19 +910,26 @@ export function brandValuesOf(raw: RawSearch): { values: { name: string; value: 
 }
 
 // The filter groups a search taught us, remembered for the same query and the
-// same narrowing (category/city/shop type/brand). A later call in that exact
-// context can be validated before spending an upstream request; any other
-// context falls back to the fresh response, which is always the authority.
+// same narrowing (category/city/shop type). A later call in that exact context
+// can be validated before spending an upstream request; any other context falls
+// back to the fresh response, which is always the authority - and the fresh
+// response is checked against in full whenever filters were passed, so a stale
+// memory can refuse a value but can never bless one.
 const filterGroupsMemory = new Map<string, FilterGroup[]>();
 const FILTER_MEMORY_ENTRIES = 200;
 const FILTER_MEMORY_PREFIX = "filters/";
 const FILTER_MEMORY_TTL_SECONDS = 30 * 60;
 
-export function filterMemoryKey(
-  q: string,
-  opts?: { category?: string; city?: string; shopType?: string; brand?: string }
-): string {
-  return [foldKey(q), opts?.category ?? "", opts?.city ?? "", opts?.shopType ?? "", opts?.brand ?? ""].join("|");
+// The narrowing that changes which filter groups a search advertises. `brand`
+// is deliberately not part of it: the reader of this memory (tools.ts) knows the
+// brand only as the caller worded it, while the writer knows the id it ended up
+// sending, so a key built from the brand could never be read back by the code
+// that wrote it - which is exactly how brand-bearing searches stopped warming
+// this path. The groups are a property of the wording plus its category, city
+// and shop type; a value that a brand's own response would not accept is caught
+// against the fresh response instead.
+export function filterMemoryKey(q: string, opts?: { category?: string; city?: string; shopType?: string }): string {
+  return [foldKey(q), opts?.category ?? "", opts?.city ?? "", opts?.shopType ?? ""].join("|");
 }
 
 export function rememberFilterGroups(key: string, groups: FilterGroup[]): void {
@@ -929,7 +952,7 @@ export async function searchProducts(opts: SearchOptions): Promise<SearchResult>
   const raw = await searchRaw(opts);
   const result = projectSearch(raw, opts);
   rememberFilterGroups(
-    filterMemoryKey(opts.q, { category: opts.category, city: opts.city, shopType: opts.shopType, brand: opts.brand }),
+    filterMemoryKey(opts.q, { category: opts.category, city: opts.city, shopType: opts.shopType }),
     result.available_filters
   );
   return result;
@@ -1009,7 +1032,19 @@ function projectSearch(raw: RawSearch, opts: SearchOptions): SearchResult {
 // The details URL is discovered through a search: Torob only hands out a
 // ready-made `more_info_url` on a result row, and it carries the ids needed to
 // open the product.
-async function detailsRaw(moreInfoUrl: string, prk: string): Promise<RawProduct> {
+//
+// `store: false` reads a cached payload but never writes one. It exists for the
+// id-only probe, which is the one caller that may be answered by a *different*
+// product: caching that answer under the probed id would later serve the wrong
+// product through the details-url path, and a wrong product is worse than an
+// extra fetch. The probe's caller stores the payload itself, after it has
+// checked the id in it.
+async function detailsRaw(moreInfoUrl: string, prk: string, store = true): Promise<RawProduct> {
+  if (!store) {
+    const remembered = cachedGet<RawProduct>(`d:${prk}`);
+    if (remembered) return remembered;
+    return torobGet<RawProduct>(moreInfoUrl);
+  }
   return cached(`d:${prk}`, TTL.product, () => torobGet<RawProduct>(moreInfoUrl));
 }
 
@@ -1077,7 +1112,12 @@ async function rowForId(
   budget: LookupBudget | undefined,
   ...queries: (string | null | undefined)[]
 ): Promise<FoundRow | null> {
-  const attempts = queries
+  // The remembered name counts as a query, and it has to: a prk is not a
+  // search term but the name the id was learned under is, and neither caller
+  // that reaches here passes a query of its own. Without this the rung took no
+  // step at all - no search was ever issued - and `exact-id` / `name-search`
+  // could not be reported even though the docs promise both.
+  const attempts = [knownName, ...queries]
     .map((q) => str(q).trim())
     .filter((q, i, all) => q.length > 0 && all.indexOf(q) === i);
   for (const q of attempts) {
@@ -1188,17 +1228,30 @@ async function detailsUrlForId(wanted: string, opts?: ProductDetailsOptions): Pr
   const prk = idFrom(wanted);
   const budget = opts?.lookupBudget;
 
-  // 1. Whatever this isolate, or another one in this colo, already learned.
-  const known = await rememberedInfo(prk);
-  if (known.url) return { prk, url: known.url, card: null, resolvedBy: "remembered" };
-
-  // 2. The details_url the caller echoed back. This is the path that needs no
-  // memory at all, which is why every card carries the URL.
+  // 1. The details_url the caller echoed back. It is fresher than anything this
+  // server remembers (a remembered address can outlive the search_id inside
+  // it), it is keyed to nothing, and it is the path that works on an isolate
+  // that never saw the search - which is why every card carries it.
   const provided = detailsUrlOf(opts?.detailsUrl);
   if (provided) {
+    // The identity being resolved is the prk the caller asked about, so a URL
+    // that carries a different one is refused rather than opened: answering
+    // about product B with product A's page is a wrong price, not a fallback.
+    const inUrl = prkInUrl(provided);
+    if (inUrl && inUrl !== prk) {
+      throw new UpstreamError(
+        `The details_url passed belongs to a different product ('${inUrl}') than the id asked about ('${prk}'). ` +
+          `Pass the prk and the details_url from the same search_products card, or leave the details_url out.`,
+        "usage"
+      );
+    }
     rememberDetailUrl({ random_key: prk, more_info_url: provided } as RawProduct);
     return { prk, url: provided, card: null, resolvedBy: "details-url" };
   }
+
+  // 2. Whatever this isolate, or another one in this colo, already learned.
+  const known = await rememberedInfo(prk);
+  if (known.url) return { prk, url: known.url, card: null, resolvedBy: "remembered" };
 
   // 3. The name the id was learned under, then the caller's own wording: a prk
   // is not a search term, a name is.
@@ -1228,10 +1281,15 @@ async function detailsUrlForId(wanted: string, opts?: ProductDetailsOptions): Pr
   }
   if (spend(budget)) {
     try {
-      const raw = await detailsRaw(prkOnlyDetailsUrl(prk), prk);
+      // Not stored on the way in: this is the one call that can be answered by
+      // a different product, and a payload cached under an id it does not carry
+      // would be handed out later as this product. It is stored below instead,
+      // after the id in it has agreed with the id that was probed.
+      const raw = await detailsRaw(prkOnlyDetailsUrl(prk), prk, false);
       const answeredId = str(raw.random_key).trim();
       const card = toCard(raw);
       if (answeredId === prk || (!answeredId && card)) {
+        cachePut(`d:${prk}`, raw, TTL.product);
         return { prk, url: prkOnlyDetailsUrl(prk), card, raw, resolvedBy: "id-only" };
       }
     } catch {
@@ -1350,26 +1408,16 @@ export async function productDetails(
  * Confirm that a product id is one Torob will answer for. Every tool that
  * opens a product by id needs the same proof: Torob's product endpoints take a
  * bare prk but answer nothing for an id they cannot resolve, and a prk alone
- * carries no search_id. Memory, the caller's details_url and a name search are
- * tried in that order - the same path product_details walks.
+ * carries no search_id. This is the ladder product_details walks - memory, the
+ * caller's details_url, the name the id was learned under, and finally the
+ * id-only probe - because a price chart promised for a torob.com product URL
+ * has to open when that URL is all the caller has.
  */
 async function confirmedPrk(prkInput: string, opts?: ProductDetailsOptions): Promise<string> {
   const wanted = str(prkInput).trim();
   if (!wanted) throw new UpstreamError("Empty product id.", "usage");
-  const prk = idFrom(wanted);
-  const provided = detailsUrlOf(opts?.detailsUrl);
-  if (provided) rememberDetailUrl({ random_key: prk, more_info_url: provided } as RawProduct);
-  if (detailUrls.has(prk)) return prk;
-  const known = await rememberedInfo(prk);
-  if (known.url) return prk;
-  const found = await rowForId(prk, known.name, opts?.lookupBudget, str(opts?.query));
-  if (found) return prk;
-  throw new UpstreamError(
-    `No record of product '${wanted}' on this server, and Torob cannot look up a product by id alone. ` +
-      `Call search_products for what the user asked for first, then pass the prk and the details_url from ` +
-      `that result.`,
-    "usage"
-  );
+  const resolved = await detailsUrlForId(wanted, opts);
+  return resolved.prk;
 }
 
 /**
@@ -1959,6 +2007,23 @@ function nameOf(row: any): string | null {
   return short(row?.name ?? row?.title, 80);
 }
 
+// Rows that all fail to parse are not an empty list. A field renamed upstream
+// (measured: `title` against `name` on the location endpoints) produced a clean
+// `[]` that read as "there are no provinces" - the wrong answer in the
+// direction a caller acts on. `results: []` means none exist; rows that exist
+// and cannot be read mean this server and Torob disagree about the shape.
+function assertReadable(list: unknown[], raw: { results?: unknown }, what: string): void {
+  const rows = Array.isArray(raw?.results) ? raw.results : [];
+  if (list.length === 0 && rows.length > 0) {
+    throw new UpstreamError(
+      `Torob answered the ${what} endpoint with ${rows.length} row(s) this server could not read. ` +
+        `The API shape may have changed, so this is reported instead of an empty list - "none found" ` +
+        `would be a different answer.`,
+      "http"
+    );
+  }
+}
+
 export async function provinces(): Promise<Province[]> {
   const raw = (await cached("prov", TTL.locations, () =>
     torobGet<any>("/v4/province/list/?size=200")
@@ -1969,6 +2034,7 @@ export async function provinces(): Promise<Province[]> {
     const name = nameOf(p);
     if (id && name) out.push({ id, name });
   }
+  assertReadable(out, raw, "province list");
   return out;
 }
 
@@ -1987,6 +2053,7 @@ export async function cities(provinceId?: string, search?: string): Promise<City
     if (!id || !name) continue;
     out.push({ id, name, province_id: str(c?.province_id ?? c?.province) || null });
   }
+  assertReadable(out, raw, "city list");
   return out;
 }
 

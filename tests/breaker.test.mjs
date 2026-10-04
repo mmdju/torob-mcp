@@ -23,6 +23,7 @@ before(() => {
   globalThis.fetch = async () => {
     calls++;
     if (mode === "challenge") return new Response("<html>arcaptcha</html>", { status: 490 });
+    if (mode === "notfound") return new Response("gone", { status: 404 });
     return new Response(JSON.stringify({ results: [], count: 0, next: "" }), {
       headers: { "content-type": "application/json" },
     });
@@ -84,4 +85,14 @@ test("an empty result upstream is not treated as a challenge", async () => {
   const out = await run("search_products", { query: "x" });
   assert.deepEqual(out.products, []);
   assert.equal(breakerRemainingMs(), 0);
+});
+
+test("a 404 upstream is reported at once instead of being retried", async () => {
+  // The retry loop exists for blips. A 4xx is the answer, not a blip: the same
+  // status will come back on every attempt, and the throw that said so used to
+  // land in the retry catch below it - four round trips and twelve seconds for
+  // a product that does not exist.
+  mode = "notfound";
+  await assert.rejects(() => run("search_products", { query: "پیدا-نمی‌شود" }), /HTTP 404/);
+  assert.equal(calls, 1, "a 4xx answer cannot change on a retry, so it must cost one call");
 });
