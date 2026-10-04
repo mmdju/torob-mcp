@@ -73,28 +73,36 @@ export const SHOP_PAGE_MAX = 20;
 // stacking up; the gate in http.ts is what stops a wall from being probed.
 export const MIN_GAP_MS = 1500;
 
+// Lifetimes are set against the wall above, not against freshness alone.
+// Measured 2026-10-04: after a long idle Torob answers exactly one call and
+// challenges the next, and a block takes about half an hour to clear. A cache
+// that expires in eight minutes holds nothing through a block - every question
+// the user repeats becomes a fresh upstream request, and the second one is
+// walled. These numbers buy the repeats inside one window while keeping a price
+// at most half an hour old, which is the bound the attribution note states.
 export const TTL = {
   suggest: 6 * HOUR, // autocomplete vocabulary barely moves
-  search: 8 * MIN, // prices move, result sets do not
-  product: 5 * MIN, // seller offers and stock are the volatile part
+  search: 30 * MIN, // long enough to outlive a block, short enough to stay honest
+  product: 20 * MIN, // seller offers and stock are the volatile part
   category: 30 * MIN,
-  similar: 15 * MIN,
+  similar: 30 * MIN,
   locations: 24 * HOUR, // province/city lists are administrative facts
-  offers: 10 * MIN,
+  offers: 30 * MIN,
   // The chart is monthly, so an hourly refresh is already finer than the data.
   chart: 6 * HOUR,
   changes: 30 * MIN, // "۸ ساعت پیش" is the unit here, so half an hour is enough
   freshness: 30 * MIN,
   shop: 6 * HOUR, // a shop's profile changes slowly (seal, address, hours)
-  shopProducts: 15 * MIN, // a catalogue's prices move like the market's
-  shops: 30 * MIN,
-  trends: 30 * MIN,
-  image: 15 * MIN,
+  shopProducts: 30 * MIN, // a catalogue's prices move like the market's
+  shops: 60 * MIN, // the directory of businesses barely moves inside an hour
+  trends: 60 * MIN, // what shoppers search shifts over hours, not minutes
+  image: 30 * MIN,
 };
 
 export const ATTRIBUTION =
   "Data comes from Torob's public web API. Prices, stock and seller offers change " +
-  "constantly - always confirm on torob.com before buying. This server is not " +
+  "constantly, and an answer may be served from what this server fetched up to half " +
+  "an hour ago - always confirm on torob.com before buying. This server is not " +
   "affiliated with or endorsed by Torob.";
 
 // The wall is not a rate limit and cannot be retried through: it is an

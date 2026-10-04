@@ -148,6 +148,30 @@ test("a page past the directory's own maximum says it was clamped", async () => 
   assert.match(String(out.page_note), /20/);
 });
 
+test("a catalogue page past the shop's own maximum says it was clamped", async () => {
+  // Same 20-page ceiling as the directory, and the same failure mode: a silent
+  // clamp reads as an empty shelf at page 21 rather than as "you asked past
+  // what this pager serves".
+  stub((url) => (url.includes("base-product/list") ? cataloguePayload : shopPayload));
+  const out = await run("shop_profile", {
+    shop_id: "365234",
+    include_products: true,
+    page: 99,
+  });
+  assert.equal(out.catalogue_page, 20, "the catalogue is fetched at the last page it serves");
+  assert.equal(out.page_clamped, true);
+  assert.equal(out.page_requested, 99);
+  assert.match(String(out.page_note), /20/);
+});
+
+test("an image page past its own maximum says it was clamped", async () => {
+  stub(() => ({ results: [], next: "" }));
+  const out = await run("search_by_image", { image_url: "https://example.com/deep/page.jpg", page: 99 });
+  assert.equal(out.page_clamped, true);
+  assert.equal(out.page_requested, 99);
+  assert.match(String(out.page_note), /20/);
+});
+
 test("search_by_image sends the link to Torob and keeps what it recognised", async () => {
   const seen = [];
   stub((url) => {

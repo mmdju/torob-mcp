@@ -128,3 +128,36 @@ test("tool names are unique", () => {
 test("the version is a real semver string", () => {
   assert.match(VERSION, /^\d+\.\d+\.\d+$/);
 });
+
+test("every maximum a schema advertises is the maximum the code enforces", () => {
+  // An agent reads the schema, not the clamp. When the two disagreed - the
+  // search tools advertised max 30 while the code stopped at 24 - asking for 30
+  // quietly returned 24 with nothing saying so, which is the same class of
+  // quiet wrongness as a silent page clamp. One chunk per tool keeps a promise
+  // and the clamp that keeps it inside the same comparison.
+  const src = readFileSync(new URL("../src/tools.ts", import.meta.url), "utf8");
+  const tools = src.split(/const \w+Tool: ToolDef = \{/).slice(1);
+  assert.ok(tools.length >= 14, `expected to split out the tool definitions, found ${tools.length}`);
+
+  const promises = /\b(\w+):\s*\{\s*type:\s*"number",\s*description:\s*"([^"]*?)max\s+(\d+)/g;
+  const clamps = /clampLimit\(args\.(\w+),\s*\d+,\s*(\d+)\)/g;
+  const checked = [];
+
+  for (const body of tools) {
+    const enforced = new Map();
+    for (const m of body.matchAll(clamps)) enforced.set(m[1], Number(m[2]));
+    for (const m of body.matchAll(promises)) {
+      const [, property, , stated] = m;
+      const actual = enforced.get(property);
+      if (actual === undefined) continue;
+      assert.equal(
+        Number(stated),
+        actual,
+        `inputSchema says ${property} takes at most ${stated}, but the clamp is ${actual}`
+      );
+      checked.push(property);
+    }
+  }
+
+  assert.ok(checked.length >= 8, `expected several advertised maxima, checked only: ${checked.join(", ") || "none"}`);
+});

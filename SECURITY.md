@@ -6,6 +6,7 @@ Torob MCP is a read-only public service. There is nothing to log in to and no us
 - No API keys are needed to use the hosted endpoint.
 - The server never signs in to Torob and never solves or evades a bot challenge - a challenge is reported as a clear, actionable error instead.
 - Nothing about a caller is stored: no accounts, no request logs, no query history. The state the server does keep, and why: a short-lived response cache plus a map of product ids it handed out (both scoped to a single isolate); a per-colo cache holding a product's name and details URL for 24 hours and a query's filter groups for 30 minutes, so a second isolate does not pay for a lookup the first one made; and the rate limiter's per-client-IP counter in a Durable Object (below).
+- **A local run also writes to your own disk**: `~/.torob-mcp/state.json` holds the same two things the per-colo cache holds - a product's name and its details URL - plus the marker saying Torob's wall is still up, so a restart does not spend a request finding that out again. No account, no credential, no query history, nothing about anyone else. `TOROB_MCP_HOME` moves it and `TOROB_MCP_STORE=off` stops it; deleting the file resets the server completely.
 - Data comes from Torob's public web API, which is undocumented and can change without notice. This project is not affiliated with or endorsed by Torob.
 
 ## The Bot Challenge

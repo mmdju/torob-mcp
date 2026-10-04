@@ -67,6 +67,21 @@ The projection layer exists because a well-formed response can still be wrong in
 - **Ids arrive as both numbers and strings.** Province and city ids are numeric; a string-only coercion dropped every row of a perfectly good response, and the tool reported "no provinces exist" while upstream had 30.
 - **A field name guessed wrong returns an empty list, not an error.** `title` versus `name` on the location endpoints produced a clean `[]`. Every endpoint's shape was therefore verified against a live response before its tool shipped - and the projection now refuses the case outright: rows that exist and cannot be read raise an error, because only `results: []` means "there is nothing here".
 
+## The local server
+
+Everything above runs in two places. The hosted Worker (`src/worker.ts`) and the Node entry (`src/index.ts`) share `buildServer` and the same fourteen tools; the one difference that matters is **where what a run learns is kept**.
+
+- `src/store.ts` is that place, behind a single interface. On Workers it is the Cache API, which is per-colo - so the colo whose egress Torob challenged carries that fact while another colo is not punished for it. On Node a backend is installed at startup by `src/store-node.ts`.
+- The local backend writes `~/.torob-mcp/state.json`. `TOROB_MCP_HOME` moves the directory, `TOROB_MCP_STORE=off` turns the store off. It holds two things: a product's name and details URL, and the marker saying the wall is still up. Writes go through synchronously, because a lost write here is either an extra search or - worse - a fresh request spent rediscovering a wall that has not lifted.
+- `src/store-node.ts` is imported by `src/index.ts` alone. The Worker bundles from `src/worker.ts`, so no `node:` import reaches it: `npx wrangler deploy --dry-run` followed by a search of the output for `node:` comes back empty.
+
+```bash
+node dist/index.js            # stdio - what an MCP client spawns
+node dist/index.js --http     # Streamable HTTP on :3000/mcp
+```
+
+Or `npx -y github:mmdju/torob-mcp`, which builds through the `prepare` script on a checkout that has no `dist/` yet.
+
 ## Verify it yourself
 
 `node scripts/verify-live.mjs` (needs Node.js 18+, nothing to install).
@@ -74,5 +89,7 @@ The projection layer exists because a well-formed response can still be wrong in
 It drives the real endpoint the way an MCP client does. It paces its calls - Torob challenges a burst, so a check that hammers every tool in a second is testing the wrong thing - and reports a challenge as the finding it is **without failing the run**: the wall is upstream's answer to a fast caller, not a broken deployment. Pass a gap in seconds to slow it further: `node scripts/verify-live.mjs 5`, or `node scripts/verify-live.mjs <url> 5` to point it elsewhere.
 
 A red badge on the [Test workflow](../.github/workflows/test.yml) means the code failed its own suite. The scheduled [Live verify](../.github/workflows/verify.yml) badge means the endpoint stopped answering its contract - health, version, landing, handshake, tool list - **or** that Torob renamed something a live check reads, since those checks fail the run too. A challenge is the one live failure that never reddens it.
+
+`node scripts/verify-pack.mjs` is the packaging half of the same idea: it packs the project, installs the tarball into a throwaway project and drives the installed bin through a handshake, so a `files` list that forgot `dist/` fails as a broken package rather than as a silent one. It needs the network and git, so it is run by hand and is not part of `npm test`.
 
 [examples/python.py](../examples/python.py) is a copy-paste client for the same endpoint.

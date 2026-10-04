@@ -24,6 +24,35 @@ Then just talk: **"ارزون‌ترین آیفون ۱۳ کجاست؟"**, **"ه�
 
 Agents running in a browser work too - the endpoint answers CORS preflights (`OPTIONS /mcp`).
 
+### Or run it on your own machine
+
+The same fourteen tools as a **local process** - no endpoint of ours, no rate limit of ours. What a run learns goes in `~/.torob-mcp/state.json`: the product names and links it found, and the wall it is waiting out. A restart keeps both; deleting that file starts you over.
+
+One line - the first run is slower because npm builds it, and `git` must be installed, since one dependency (`fa-text-utils`) is fetched from a git repository:
+
+```json
+{
+  "mcpServers": {
+    "torob": { "command": "npx", "args": ["-y", "github:mmdju/torob-mcp"] }
+  }
+}
+```
+
+Or from a clone, if you would rather run code you can read:
+
+```bash
+git clone https://github.com/mmdju/torob-mcp.git
+cd torob-mcp && npm install      # the prepare script builds dist/
+```
+
+```json
+{
+  "mcpServers": {
+    "torob": { "command": "node", "args": ["/path/to/torob-mcp/dist/index.js"] }
+  }
+}
+```
+
 ## 14 tools
 
 | Tool | What it answers |

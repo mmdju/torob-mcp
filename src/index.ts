@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // torob-mcp (Node): stdio by default, Streamable HTTP with --http.
 import { createServer } from "node:http";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";

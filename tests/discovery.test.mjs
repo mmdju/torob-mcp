@@ -478,3 +478,37 @@ test("a search that carried a brand still teaches this query its filters", async
   );
   assert.equal(fetches, afterWarm, "the refusal must come from memory, before an upstream request");
 });
+
+test("a full page of children says more may exist without promising it", async () => {
+  // Upstream sends no total here, so exactly `limit` children is all this can
+  // honestly claim - and at the tool's own maximum it must not tell anyone to
+  // raise a limit that is already as high as it goes.
+  const categories = Array.from({ length: 30 }, (_, i) => ({
+    id: String(9100 + i),
+    title: `دسته ${i}`,
+    count: 3,
+  }));
+  stub(() => ({ count: categories.length, categories }));
+
+  const out = await run("browse_categories", { id: "1", limit: 30 });
+  assert.equal(out.categories.length, 30);
+  assert.equal(out.has_more, true);
+  assert.match(String(out.note), /largest page/);
+  assert.doesNotMatch(String(out.note), /raise limit/, "it must not send anyone to a limit already at its maximum");
+});
+
+test("a city list that was cut says how much was left out", async () => {
+  // Cities run into thousands, so they keep a smaller default than the page
+  // allows - and a cut list that reports only what it returned reads as
+  // "these are all the cities", which is a different claim entirely.
+  const results = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, name: `شهر ${i + 1}` }));
+  stub(() => ({ count: results.length, next: null, previous: null, results }));
+
+  const out = await run("list_locations", { search: "شهر", limit: 50 });
+  assert.equal(out.mode, "cities");
+  assert.equal(out.cities.length, 50);
+  assert.equal(out.total, 100, "the real size travels with the cut list");
+  assert.equal(out.truncated, true);
+  assert.match(String(out.note), /Showing 50 of 100/);
+  assert.match(String(out.note), /200/, "the note says how far the limit can be raised");
+});

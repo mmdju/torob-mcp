@@ -9,7 +9,7 @@ import { UpstreamError } from "./http.js";
 import { setWaitUntil, type WaitUntil } from "./project.js";
 import { READ_ONLY, TOOLS } from "./tools.js";
 
-export const VERSION = "0.4.1";
+export const VERSION = "0.5.0";
 
 // Server-level guidance: cheaper than repeating it in every tool description,
 // and it steers the agent before it picks a tool at all. It is the first thing
@@ -58,8 +58,10 @@ export const INSTRUCTIONS = [
   "Torob's edge answers bursts of calls with a bot challenge (HTTP 490). It clears after a stretch " +
   "with no calls at all - minutes to half an hour - so a challenged error is worth retrying later, " +
   "never immediately.",
-  "Prices and stock move constantly: always keep the product URL in the answer so the user can confirm " +
-  "on torob.com before buying.",
+  "Prices and stock move constantly, and an answer can be served from what this server fetched up to " +
+  "half an hour ago: when the freshness of a number is what the user is deciding on, call it recent " +
+  "rather than current, and always keep the product URL in the answer so they can confirm on torob.com " +
+  "before buying.",
   "This server never logs in, never solves bot challenges, and never contacts a shop. It reads the public " +
   "web API only.",
 ].join(" ");

@@ -537,3 +537,31 @@ test("an id-only answer for another product is never remembered as this one", as
   });
   assert.equal(out.name_fa, "گوشی ایفون ۱۳", "the mismatched answer from the probe must not come back from cache");
 });
+
+test("search_products stops at one page of cards and admits the page held more", async () => {
+  // Upstream sends 24-26 cards whatever size is asked for, so 100 used to
+  // promise more than a page can deliver - and the tool must say it was short
+  // rather than hand over 24 as if that were 100.
+  const many = Array.from({ length: 40 }, (_, i) => ({
+    ...searchPayload.results[0],
+    random_key: `prk-page-${i}`,
+    web_client_absolute_url: `/p/prk-page-${i}/`,
+    more_info_url: `https://api.torob.com/v4/base-product/details/?search_id=s1&prk=prk-page-${i}`,
+  }));
+  stub(() => ({ ...searchPayload, results: many }));
+
+  const out = await run("search_products", { query: "کلاه ایمنی", limit: 100 });
+  assert.equal(out.products.length, 24, "the page carries 24, whatever was asked for");
+  assert.equal(out.truncated, true, "and the answer says the page held more than it returned");
+  assert.equal(out.returned, 24);
+  assert.match(String(out.note), /40 cards/);
+});
+
+test("a search page past the last one says it was clamped instead of quoting it", async () => {
+  stub(() => searchPayload);
+  const out = await run("search_products", { query: "دوربین عکاسی", page: 99 });
+  assert.equal(out.page, 50, "the page actually used is the last one");
+  assert.equal(out.page_clamped, true);
+  assert.equal(out.page_requested, 99);
+  assert.match(String(out.page_note), /50/);
+});

@@ -2,6 +2,30 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
+## 0.5.0 - 2026-10-04
+
+The service can now run on a machine of your own, and the bot wall stops costing a request every time something new hears about it.
+
+### Added
+
+- **A local server, installable in one line.** `npx -y github:mmdju/torob-mcp` starts the same fourteen tools over stdio - no endpoint, no rate limit of ours - and `bin/torob-mcp` launches it. A clone runs it with `node dist/index.js`. The package ships `dist/`, `bin/` and the docs and nothing else, and a git checkout builds itself through `prepare`, so the one-line install never meets a `dist/` that is not there yet.
+- **What a run learns survives the run.** `src/store.ts` is a single interface with two backends: the per-colo Cache API on a Worker, and - on Node - a file written at `~/.torob-mcp/state.json` (`TOROB_MCP_HOME` moves it, `TOROB_MCP_STORE=off` turns it off). Writes go through synchronously, because a lost write here is either an extra search or a fresh request spent rediscovering a wall that has not lifted. This also fixed a quiet hole: the layer that remembers a product's name and details URL depended on the Cache API, which does not exist in Node, so the local server was blind to everything it had already found.
+- **The wall gate is shared, not per-isolate.** The state lives in the store, so another isolate in the same colo - or the next run of the local server - reads it instead of spending a request to rediscover a wall that is still up. Two stages, because two measurements differ by more than an order of magnitude: five minutes for a first challenge, thirty once a repeat has said the short one was not enough, so the probe that discovers a long block is spent once per stage rather than once per isolate. A real answer reopens the gate, but only for a call that started after it shut, so a response already in flight cannot undo a fresh challenge.
+- **One upstream call at a time, held to the end of its attempt.** A pacing gap alone let two fetches overlap whenever a response took longer than the gap; the slot is now held until the attempt finishes, which is what makes "a challenged burst costs exactly one request" true when an agent fires several calls at once.
+
+### Changed
+
+- **Cache lifetimes are set against the wall, not against freshness alone.** Measured 2026-10-04: after a long idle Torob answers one call and challenges the next, and a block takes about twenty-seven minutes to clear - so a search that expired after eight minutes held nothing through a block, and every question the user repeated became a fresh request for the second one to wall. Search goes 8 → 30 minutes, a product page 5 → 20, similar/offer/image/catalogue 30, the shop directory and trends 60. An answer can therefore be up to half an hour old, and both `attribution` and the server's own instructions now say exactly that instead of leaving freshness to be assumed.
+
+### Fixed
+
+- **`search_products` and `search_by_image` advertised `max 30` in their schemas while the code stopped at 24.** An agent reads the schema, so asking for 30 returned 24 with nothing saying so - the same quiet wrongness as a silent page clamp. `list_locations` also failed to say that provinces come back whole. A test now walks every tool and compares each advertised maximum against the clamp that enforces it.
+
+### Coverage
+
+- **The MCP protocol layer, which nothing else touched.** Every other test calls a tool's `run()` directly and skips `buildServer` entirely, so the unknown-tool message and the conversion of a thrown error into `isError` could have rotted without a failure. They now run over a real client and server pair, with `fetch` stubbed so no test can spend a request against Torob.
+- **The page and limit caps at tool level**, next to the fixtures that already exist for each tool: a search past page 50, a catalogue or image past page 20, a page of categories full at the tool's maximum, a city list cut in half, and a search asked for 100 cards.
+
 ## 0.4.1 - 2026-10-04
 
 Answers that were wrong, and promises the docs made that the code did not keep. Everything below is on the hosted service as of this release.

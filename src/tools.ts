@@ -259,7 +259,7 @@ const searchTool: ToolDef = {
           "refused with the real ones rather than silently ignored.",
         additionalProperties: { type: "string" },
       },
-      limit: { type: "number", description: "How many cards to return (default 10, max 30)." },
+      limit: { type: "number", description: "How many cards to return (default 10, max 24 - one page carries that many)." },
     },
     required: ["query"],
   },
@@ -906,7 +906,7 @@ const locationsTool: ToolDef = {
     properties: {
       province_id: { type: "string", description: "Province id, to list its cities instead of the provinces." },
       search: { type: "string", description: "Filter by name, e.g. 'تهران'." },
-      limit: { type: "number", description: "How many to return (default 30, max 200)." },
+      limit: { type: "number", description: "How many to return (cities default 30, max 200; provinces come back whole, all 31)." },
     },
     required: [],
   },
@@ -1199,7 +1199,7 @@ const searchByImageTool: ToolDef = {
     properties: {
       image_url: { type: "string", description: "A public http(s) URL of the picture to search Torob with." },
       page: { type: "number", description: "1-based page (default 1)." },
-      limit: { type: "number", description: "How many cards (default 10, max 30)." },
+      limit: { type: "number", description: "How many cards (default 10, max 24 - one page carries that many)." },
     },
     required: ["image_url"],
   },
