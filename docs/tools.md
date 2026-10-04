@@ -33,7 +33,7 @@ Shared conventions:
 - `available: false` on a card or an offer is upstream's "not for sale right now".
 - **In-person prices are the shops' own and can be old.** Every in-person row carries `last_price_change_date` (Torob's wording, e.g. `"۸ ماه و ۹ روز پیش"`), so say how old a shelf price is instead of presenting it as today's.
 - **Torob's own labels travel as sent** - filter titles, series names (`"میانگین قیمت"`), shop notes, campaign names. Quote them rather than translating them into a claim.
-- **Bot challenge.** Torob answers a client that calls too often with HTTP 490 instead of data. It clears on its own after a few idle minutes. A challenged call is worth retrying later, not immediately; the server holds the rest of a burst for five minutes so it does not deepen the block.
+- **Bot challenge.** Torob answers a client that calls too often with HTTP 490 instead of data. It clears on its own after a stretch with no calls at all - measured anywhere from a few minutes to half an hour. A challenged call is worth retrying later, not immediately; the server holds the rest of a burst for the whole cooldown so it does not deepen the block, and says how many minutes are left.
 
 ## `torob_suggest`
 

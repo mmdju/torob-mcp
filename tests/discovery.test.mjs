@@ -24,9 +24,9 @@ function stub(handler) {
 // test below uses a distinct category id / province id so its cache key is
 // its own.
 
-test.afterEach(() => {
+test.afterEach(async () => {
   globalThis.fetch = originalFetch;
-  resetBreakerForTests();
+  await resetBreakerForTests();
 });
 
 const run = (name, args) => TOOLS.find((t) => t.name === name).run(args);

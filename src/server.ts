@@ -55,8 +55,9 @@ export const INSTRUCTIONS = [
   "An empty result is not proof a product does not exist - the wording may simply be wrong. When a search " +
   "returns nothing, call torob_suggest and retry with what it suggests.",
   "Torob pages are paginated (page 1-based, max 50) and deep pages cost an extra upstream request.",
-  "Torob's edge answers bursts of calls with a bot challenge (HTTP 490). It clears after a few idle " +
-  "minutes, so a challenged error is worth retrying later - not worth retrying immediately.",
+  "Torob's edge answers bursts of calls with a bot challenge (HTTP 490). It clears after a stretch " +
+  "with no calls at all - minutes to half an hour - so a challenged error is worth retrying later, " +
+  "never immediately.",
   "Prices and stock move constantly: always keep the product URL in the answer so the user can confirm " +
   "on torob.com before buying.",
   "This server never logs in, never solves bot challenges, and never contacts a shop. It reads the public " +

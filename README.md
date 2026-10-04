@@ -55,7 +55,7 @@ Notes for agent builders:
 - **A shop grade needs its vote count.** Torob sends a score for nearly every offer but almost never the votes behind it, so `shop_score: 5` with `shop_votes: 0` is normal and means "no votes yet", not "five-star shop".
 - **An empty result is not proof a product does not exist.** The response carries `query_note` plus Torob's own `suggested_queries` - retry with one of them instead of telling the user it is unavailable.
 - **An unknown filter slug or value is refused with the real ones.** `available_filters` carries each group's accepted values (`options`, plus `values_url` for the full brand list); Torob ignores a slug or value it does not know and answers **unfiltered**, so a typo used to hand back a full unfiltered list that read as a filtered answer.
-- **Torob answers a client that calls too fast with a bot challenge instead of data.** The server reports it plainly, never solves or evades it, and holds the rest of a burst for five minutes rather than retrying into a longer block. Details in [SECURITY.md](SECURITY.md).
+- **Torob answers a client that calls too fast with a bot challenge instead of data.** The server reports it plainly, never solves or evades it, and holds the rest of a burst for the whole cooldown rather than retrying into a longer block. Details in [SECURITY.md](SECURITY.md).
 - Results are **capped** (default 10, and each tool's own maximum - 24 on a product search, 30 on most lists - is in [docs/tools.md](docs/tools.md)) to protect agent context. Persian wording is folded (Arabic yeh/kaf, Persian and Arabic-Indic digits, ZWNJ kept) when cache keys and product names are compared - the query itself reaches Torob exactly as typed, and Torob folds it the same way.
 - **[examples/sample-calls.md](examples/sample-calls.md)** has eleven copy-paste flows, and **[docs/tools.md](docs/tools.md)** has every parameter and filter slug. Response types live in **[docs/card.d.ts](docs/card.d.ts)**.
 
@@ -85,7 +85,7 @@ What this means:
 - **Read-only.** All 14 tools carry `readOnlyHint`. Nothing here can change, delete or order anything, and no shop is ever contacted.
 - **Projected, not passed through.** A Torob search page is roughly 70KB of ranking metadata and experiment plumbing. Every tool returns a compact record built by the server's projection layer instead, with the seller list as a first-class `offers[]` array rather than a flattened string.
 - **No user data.** Nothing about you is stored. What the server does keep: a short-lived response cache and a small map of product ids it handed out, so an id can be resolved back to its seller list.
-- **Rate-aware by necessity.** Torob does not throttle with a 429 - it answers a client that calls too fast with a **bot challenge**. Upstream calls are serialized with a 1.5s gap, and a challenge opens a circuit breaker instead of a retry storm.
+- **Rate-aware by necessity.** Torob does not throttle with a 429 - it answers a client that calls too fast with a **bot challenge**. Upstream calls run one at a time with a 1.5s gap, and a challenge closes a gate that the whole server shares instead of opening a retry storm - so the calls behind it spend no request at all.
 - **Undocumented upstream.** Torob's public API can change without notice, which is exactly why the [verify script](scripts/verify-live.mjs) exists.
 
 ## Trust, verified

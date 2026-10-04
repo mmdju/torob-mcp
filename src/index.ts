@@ -5,6 +5,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { MAX_BODY_BYTES, PORT } from "./config.js";
 import { LANDING, MCP_PAGE } from "./landing.js";
 import { buildServer, VERSION } from "./server.js";
+import { installFileStore } from "./store-node.js";
 
 // Browser-based MCP clients cannot POST /mcp without CORS (same as worker.ts).
 const CORS_HEADERS = {
@@ -15,6 +16,12 @@ const CORS_HEADERS = {
 };
 
 async function main() {
+  // What this run learns goes on disk before anything else happens. Without it
+  // a restart forgets both the product names it found and the wall Torob had
+  // just put up - and rediscovering the wall costs exactly the kind of extra
+  // request that extends it. `TOROB_MCP_STORE=off` opts out.
+  if (process.env.TOROB_MCP_STORE !== "off") installFileStore();
+
   if (process.argv.includes("--http")) {
     // Stateless: every POST is self-contained. The SDK requires a fresh
     // transport (and therefore a fresh Server) per request.

@@ -27,9 +27,9 @@ function stub(handler) {
     });
   };
 }
-test.afterEach(() => {
+test.afterEach(async () => {
   globalThis.fetch = originalFetch;
-  resetBreakerForTests();
+  await resetBreakerForTests();
 });
 const run = (name, args) => TOOLS.find((t) => t.name === name).run(args);
 

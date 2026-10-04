@@ -47,14 +47,16 @@ The price tools are one hop each, keyed by the same `prk`: Torob's chart (`/v4/b
 
 Torob's edge answers a client that calls too often with **HTTP 490** and an arCAPTCHA page where the JSON should be. This is not a 429 and not a redirect, and it does not clear on retry.
 
-Two things were measured. A Worker's own egress is not challenged, so a normally-paced server answers fine - but a burst is enough to trip it, and then the block persists for roughly five idle minutes. And it punishes exactly what a naive client does next: retry.
+Two measurements exist. On 2026-09-24 a burst was enough to trip it and the block then cleared after about five idle minutes. Re-measured on 2026-10-03/04 the trigger is far lower - one or two requests following a long idle - and one block took about twenty-seven minutes to clear; a Cloudflare Worker and the dev machine were challenged in the same hour, so no egress is exempt. And it punishes exactly what a naive client does next: retry.
 
 So the server treats a challenge as a cooldown, not a failure to retry:
 
 - The first challenge is reported honestly. It is never retried - solving it is not this server's job, and hammering while it is up is how a temporary block becomes a permanent one.
-- It opens a **circuit breaker** for that isolate. The rest of the burst fails immediately with a "retry in N minutes" message and **spends no upstream request at all**, so the traffic that caused the challenge is not extended by the retries behind it.
-- The breaker is per-isolate and expires on its own. A fresh isolate gets a clean chance rather than inheriting someone else's cooldown.
-- Upstream calls are serialized with a 1.5s gap, and a challenged response is never cached.
+- It closes a **gate**. The rest of the burst fails immediately with a "retry in N minutes" message and **spends no upstream request at all**, so the traffic that caused the challenge is not extended by the retries behind it.
+- The gate is **shared through the store** (`src/store.ts`), not held by one isolate: another isolate in the same colo, or the next run of the local server, reads the same state instead of spending a fresh request to rediscover a wall that is still up.
+- Two stages, because the two measurements differ by more than an order of magnitude: five minutes for the first challenge, thirty once a repeat has said the short one was not enough. The probe that discovers the long stage is spent once per stage rather than once per isolate.
+- A real answer reopens the gate - only for a call that started after it shut, so a response already in flight cannot undo a fresh challenge.
+- Upstream calls are serialized one at a time: a 1.5s gap, and the slot is held until the attempt finishes, so a parallel burst cannot overlap. A challenged response is never cached.
 
 ## Reading a response that answers 200
 

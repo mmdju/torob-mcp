@@ -66,11 +66,11 @@ export const SHOP_PAGE_MAX = 20;
 // Filters are therefore validated against the search's own response - see
 // project.ts (filter groups + memory) and tools.ts (validation).
 
-// The gap between upstream calls. Torob's edge challenges a client that
-// arrives too fast - measured: a worker answering normally, then answering 490
-// after a burst of probes, and recovering after roughly five idle minutes. The
-// number here is deliberately unhurried; a 429-free but challenged response is
-// worse for the user than a slow answer.
+// The gap between upstream calls, and the floor under it - not the trigger.
+// Measured 2026-10-04: after a long idle exactly one call answered, and the
+// next one 45-113 seconds later was challenged, so no gap this side of minutes
+// buys safety on its own. The number here keeps concurrent tool calls from
+// stacking up; the gate in http.ts is what stops a wall from being probed.
 export const MIN_GAP_MS = 1500;
 
 export const TTL = {
@@ -100,14 +100,16 @@ export const ATTRIBUTION =
 // The wall is not a rate limit and cannot be retried through: it is an
 // anti-bot challenge. Say so plainly instead of returning an empty list that
 // an agent would read as "no such product". Measured: it clears on its own
-// after a few idle minutes, so the message says that rather than telling the
-// caller to give up - and the server's circuit breaker stops the rest of a
-// burst from hammering while it waits.
+// after a stretch with no calls at all - five idle minutes in September, about
+// twenty-seven in October - so the message says that rather than telling the
+// caller to give up, and the gate in http.ts keeps the calls behind the first
+// challenge from hammering while it waits.
 export const CHALLENGED_MSG =
-  "Torob answered with a bot challenge (HTTP 490) instead of data, because too many calls " +
-  "arrived too quickly. This is not a rate limit and an immediate retry will not clear it - " +
-  "it clears after a few minutes of no calls. Wait, then retry the same call; or ask the " +
-  "user to search on torob.com and share the product URL.";
+  "Torob answered with a bot challenge (HTTP 490) instead of data, because its edge judged " +
+  "this client a bot. This is not a rate limit and an immediate retry will not clear it - " +
+  "it clears after a stretch with no calls at all, measured anywhere from a few minutes to " +
+  "half an hour. Wait, then retry the same call; or ask the user to search on torob.com and " +
+  "share the product URL.";
 
 // Torob reports a shop score for essentially every offer but almost never
 // reports the vote count behind it (measured: 30 of 30 offers had

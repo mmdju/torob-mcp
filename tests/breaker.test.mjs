@@ -9,8 +9,12 @@
 // the other test files too.
 import { test, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { breakerRemainingMs, resetBreakerForTests, setPaceForTests, setRetryDelayForTests } from "../dist/http.js";
+import { breakerRemainingMs, expireWallForTests, forgetLocalWallForTests, resetBreakerForTests, setPaceForTests, setRetryDelayForTests } from "../dist/http.js";
+import { installFileStore, uninstallFileStore } from "../dist/store-node.js";
 import { TOOLS } from "../dist/tools.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 setPaceForTests(0);
 setRetryDelayForTests(0);
@@ -18,8 +22,13 @@ setRetryDelayForTests(0);
 const realFetch = globalThis.fetch;
 let calls = 0;
 let mode = "challenge";
+// The gate is only worth testing with a real store behind it: the whole point
+// is that it outlives the process that discovered the wall.
+let storeDir = "";
 
 before(() => {
+  storeDir = mkdtempSync(join(tmpdir(), "torob-mcp-wall-"));
+  installFileStore({ dir: storeDir });
   globalThis.fetch = async () => {
     calls++;
     if (mode === "challenge") return new Response("<html>arcaptcha</html>", { status: 490 });
@@ -32,10 +41,15 @@ before(() => {
 
 after(() => {
   globalThis.fetch = realFetch;
+  uninstallFileStore();
+  rmSync(storeDir, { recursive: true, force: true });
 });
 
-beforeEach(() => {
-  resetBreakerForTests();
+// The local state is wiped by hand and so is the shared one - otherwise the
+// challenge from one test would stop the next from spending a request at all,
+// which is exactly the behaviour being tested.
+beforeEach(async () => {
+  await resetBreakerForTests();
   calls = 0;
   mode = "challenge";
 });
@@ -56,7 +70,7 @@ test("the breaker stops the rest of a burst from calling upstream at all", async
   // Everything behind it fails without spending a request - which is the whole
   // point: the burst that caused the challenge is not extended by the retries.
   for (const q of ["y", "z", "w"]) {
-    await assert.rejects(() => run("search_products", { query: q }), /challenged this worker recently/);
+    await assert.rejects(() => run("search_products", { query: q }), /challenged this server recently/);
   }
   assert.equal(calls, afterFirst, "calls during the cooldown must not reach Torob");
 });
@@ -71,7 +85,7 @@ test("the breaker expires, so a later call gets a clean chance", async () => {
   assert.ok(breakerRemainingMs() > 0, "breaker should be open after a challenge");
   assert.ok(breakerRemainingMs() <= 5 * 60_000, "breaker should not last longer than its window");
 
-  resetBreakerForTests();
+  await resetBreakerForTests();
   assert.equal(breakerRemainingMs(), 0);
 
   // With the breaker cleared and upstream healthy again, the call goes through.
@@ -95,4 +109,57 @@ test("a 404 upstream is reported at once instead of being retried", async () => 
   mode = "notfound";
   await assert.rejects(() => run("search_products", { query: "پیدا-نمی‌شود" }), /HTTP 404/);
   assert.equal(calls, 1, "a 4xx answer cannot change on a retry, so it must cost one call");
+});
+
+test("a challenge is remembered after the process that found it is gone", async () => {
+  await assert.rejects(() => run("search_products", { query: "wall-memory" }));
+  assert.equal(calls, 1);
+
+  // What a fresh isolate, or the next run of the local server, sees: nothing
+  // in memory at all - while the shared copy is left exactly where it was.
+  forgetLocalWallForTests();
+  assert.equal(breakerRemainingMs(), 0);
+
+  // ...and the stored state still stops the call before it reaches Torob. This
+  // is the difference between one wasted request and one per isolate.
+  await assert.rejects(() => run("search_products", { query: "wall-memory-2" }), /challenged this server/);
+  assert.equal(calls, 1, "a fresh isolate must not spend a request rediscovering the wall");
+});
+
+test("a burst that arrives together costs one upstream request", async () => {
+  const results = await Promise.allSettled(
+    ["a", "b", "c", "d"].map((q) => run("search_products", { query: q }))
+  );
+  assert.equal(calls, 1, "callers arriving together must queue behind the first challenge");
+  assert.ok(
+    results.every((r) => r.status === "rejected"),
+    "every one of them must report the challenge rather than an empty answer"
+  );
+});
+
+test("a repeat challenge earns the long stage instead of the short one", async () => {
+  await assert.rejects(() => run("search_products", { query: "wall-stage" }));
+  const stageOne = breakerRemainingMs();
+  assert.ok(stageOne > 0, "the first challenge closes the gate");
+  assert.ok(stageOne <= 5 * 60_000, "the first stage is the short one");
+
+  // The stage lapses on its own, which is the only way to reach the second
+  // stage without waiting half an hour - and the probe costs one request.
+  await expireWallForTests();
+  await assert.rejects(() => run("search_products", { query: "wall-stage-2" }));
+  assert.equal(calls, 2, "one probe per stage");
+
+  const stageTwo = breakerRemainingMs();
+  assert.ok(stageTwo > stageOne, "a repeat challenge must not get the short stage again");
+  assert.ok(stageTwo <= 30 * 60_000, "but it stays bounded");
+});
+
+test("an answer that is not a challenge reopens the gate", async () => {
+  await assert.rejects(() => run("search_products", { query: "wall-reopen" }));
+  await expireWallForTests();
+
+  mode = "ok";
+  const out = await run("search_products", { query: "wall-reopen" });
+  assert.equal(out.products.length, 0);
+  assert.equal(breakerRemainingMs(), 0, "a real answer proves we are through");
 });

@@ -15,8 +15,9 @@ Torob does not throttle with an HTTP 429. It answers a client that calls too oft
 This server treats a challenge as a cooldown, not a failure to retry:
 
 - The first challenge is reported honestly and is **never retried**.
-- It opens a **circuit breaker** for that isolate. The rest of a burst fails immediately with a "retry in N minutes" message and spends **no upstream request at all**, so the traffic that caused the challenge is not extended by the retries behind it.
-- The breaker expires on its own after five minutes; a fresh isolate gets a clean chance.
+- It closes a **gate**. The rest of a burst fails immediately with a "retry in N minutes" message and spends **no upstream request at all**, so the traffic that caused the challenge is not extended by the retries behind it.
+- The gate is shared through the store (`src/store.ts`): another isolate in the same colo, or the next run of the local server, reads the same state instead of spending a fresh request rediscovering a wall that is still up.
+- The first stage is five minutes; a repeat challenge earns thirty. Measured 2026-10-04, a block took about twenty-seven minutes to clear, so the probe is spent once per stage rather than once per isolate. A real answer reopens the gate.
 - Upstream calls are serialized with a 1.5s gap, and a challenged response is never cached.
 
 ## Rate Limiting
@@ -27,7 +28,7 @@ Twenty a minute is far above a real conversation: the fourteen tools take fourte
 
 **A self-hosted run has no limit.** The limiter lives in `src/rate-limit.ts` and is imported by `src/worker.ts` alone; the server core and the Node entry point do not know it exists.
 
-What bounds the upstream load is the gap and the circuit breaker above. A burst of parallel tool calls will not produce a burst of upstream requests - it will produce one request, a reported challenge, and then fast local refusals for the rest of that window.
+What bounds the upstream load is the pacing and the gate above. A burst of parallel tool calls will not produce a burst of upstream requests - it will produce one request, a reported challenge, and then fast local refusals for the rest of that window, from whichever isolate or run hears about the challenge first.
 
 ## CORS
 

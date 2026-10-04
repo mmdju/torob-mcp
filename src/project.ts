@@ -19,6 +19,7 @@
 import { ATTRIBUTION, MIN_SHOP_VOTES, SORT_PARAMS, SOURCE, TOROB_API, TTL, type Sort } from "./config.js";
 import { cacheSet as cachePut, cached, cachedGet } from "./cache.js";
 import { UpstreamError, torobGet } from "./http.js";
+import { storeGet, storeSet } from "./store.js";
 import {
   availableFrom,
   foldKey,
@@ -1135,39 +1136,20 @@ async function rowForId(
 // What an isolate learns has to outlive it. A Worker spreads consecutive
 // requests across many isolates, so an in-process map is a fast path and
 // nothing more - a live test caught a call failing because it landed somewhere
-// the search had never run. The Cache API is per-colo rather than per-isolate,
-// so one isolate learning a product spares the others in that colo, and the
-// entry carries both things it learned: the name and the details URL. It is a
-// cache: a write that fails only costs one extra search, so failures are
-// swallowed rather than raised - and the write goes through `waitUntil`, so it
-// is not cut off when the response finishes.
-const REMEMBERED_CACHE_PREFIX = "https://torob-mcp.internal/product/";
+// the search had never run. The shared layer (`store.ts`) is per-colo on
+// Workers and a file on the local server, so one run learning a product spares
+// the next run of it, and the entry carries both things it learned: the name
+// and the details URL. It is a cache: a write that fails only costs one extra
+// search, so failures are swallowed rather than raised - and the write goes
+// through `waitUntil`, so it is not cut off when the response finishes.
 const REMEMBERED_TTL_SECONDS = 24 * 60 * 60;
 
 async function cacheGet(key: string): Promise<unknown | undefined> {
-  try {
-    const cache = (globalThis as { caches?: { default?: Cache } }).caches?.default;
-    if (!cache) return undefined;
-    const hit = await cache.match(`${REMEMBERED_CACHE_PREFIX}${key}`);
-    return hit ? await hit.json() : undefined;
-  } catch {
-    return undefined;
-  }
+  return storeGet<unknown>(`product/${key}`);
 }
 
 async function cacheSet(key: string, value: unknown, ttlSeconds: number): Promise<void> {
-  try {
-    const cache = (globalThis as { caches?: { default?: Cache } }).caches?.default;
-    if (!cache) return;
-    await cache.put(
-      `${REMEMBERED_CACHE_PREFIX}${key}`,
-      new Response(JSON.stringify(value), {
-        headers: { "content-type": "application/json", "cache-control": `public, max-age=${ttlSeconds}` },
-      })
-    );
-  } catch {
-    /* best effort - the in-process map still has it */
-  }
+  await storeSet(`product/${key}`, value, ttlSeconds);
 }
 
 // What one isolate learned from a search row, read back: the product's name and

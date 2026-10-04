@@ -22,9 +22,9 @@ function stub(handler) {
 // The challenge test below trips the circuit breaker, and the breaker is
 // per-isolate module state that outlives a single test. Clear it alongside the
 // fetch stub so the next test starts from a clean slate.
-test.afterEach(() => {
+test.afterEach(async () => {
   globalThis.fetch = originalFetch;
-  resetBreakerForTests();
+  await resetBreakerForTests();
 });
 
 const run = (name, args) => TOOLS.find((t) => t.name === name).run(args);
