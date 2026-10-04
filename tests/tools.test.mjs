@@ -566,6 +566,48 @@ test("a search page past the last one says it was clamped instead of quoting it"
   assert.match(String(out.page_note), /50/);
 });
 
+test("browse_categories honours the limit it advertises", async () => {
+  // Measured live: limit 5 came back with 22 rows, because this endpoint
+  // ignores `size` upstream and the tool returned whatever arrived. Every other
+  // list here slices to its limit - a limit nobody enforces is a promise the
+  // schema should not make.
+  const categories = Array.from({ length: 22 }, (_, i) => ({ id: String(7100 + i), title: `دسته ${i}`, count: 2 }));
+  stub(() => ({ count: categories.length, categories }));
+
+  const out = await run("browse_categories", { id: "1", limit: 5 });
+  assert.equal(out.categories.length, 5, "the caller asked for 5, so 5 is what comes back");
+  assert.equal(out.count, 5, "count describes the answer, not what upstream happened to send");
+  assert.equal(out.has_more, true, "and it may still say the page holds more");
+  assert.match(String(out.note), /may exist|possibly more/i);
+});
+
+test("a query with a نیم‌فاصله is searched the way Torob's index stores it", async () => {
+  // Measured 2026-10-04: 'لپ‌تاپ ایسر' (U+200C) returned 0 results while
+  // 'لپ تاپ ایسر' returned 1200, and Torob's own suggestion for the empty
+  // answer was the spaced form. The answer echoes what was asked for; only the
+  // request changes.
+  const seen = [];
+  stub((url) => {
+    // URLSearchParams writes a space as '+', which decodeURIComponent leaves
+    // alone - undo both so the assertions read like the words that were sent.
+    seen.push(decodeURIComponent(url.replace(/\+/g, " ")));
+    return searchPayload;
+  });
+
+  const joined = await run("search_products", { query: "لپ‌تاپ ایسر", limit: 2 });
+  assert.equal(seen.length, 1);
+  // The joiner as a code point, never as a raw character in source: an
+  // invisible one does not survive a copy, a reformat, or anyone reading it.
+  assert.ok(!seen[0].includes(String.fromCharCode(0x200c)), `the request still carries a joiner: ${seen[0]}`);
+  assert.ok(seen[0].includes("لپ تاپ ایسر"), `expected the spaced form upstream: ${seen[0]}`);
+  assert.equal(joined.query, "لپ‌تاپ ایسر", "the answer echoes the caller's own wording");
+
+  // The two spellings are one search, so the second costs no request at all.
+  const spaced = await run("search_products", { query: "لپ تاپ ایسر", limit: 2 });
+  assert.equal(seen.length, 1, "the joiner must not buy a second upstream request");
+  assert.deepEqual(spaced.products, joined.products);
+});
+
 test("a retry backs off without holding every other call hostage", async () => {
   // The slot exists so two fetches cannot overlap - not so one caller's backoff
   // can stall everyone queued behind it. Retries wait seconds by default; if

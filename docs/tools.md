@@ -41,7 +41,7 @@ Vague or colloquial wording to **the search terms Torob itself suggests**. Call 
 
 | Param | Type | Required | Notes |
 |---|---|---|---|
-| `query` | string | **yes** | What the user actually typed, e.g. `قاب گوشی` |
+| `query` | string | **yes** | What the user actually typed, e.g. `قاب گوشی`. A نیم‌فاصله is searched as a space |
 
 Returns: `suggestions` (array of strings, deduped, max 10), `next` telling you what to do with them, and - when Torob's autocomplete offered shop entries instead of search terms - a `note` saying how many such entries were dropped. An empty `suggestions` array is not a failure - it means Torob has no better wording, so pass the query to `search_products` as-is.
 
@@ -51,7 +51,7 @@ Search Torob, get **compact cards**: the cheapest offer in Toman, the shop behin
 
 | Param | Type | Notes |
 |---|---|---|
-| `query` | string | Persian or English, e.g. `گوشی ایفون ۱۳`, `iphone 13` |
+| `query` | string | Persian or English, e.g. `گوشی ایفون ۱۳`, `iphone 13`. A نیم‌فاصله is searched as a space - Torob's index stores the spaced form, so `لپ‌تاپ` would match nothing |
 | `page` | number | 1-based, max 50 |
 | `sort` | string | `popularity` (default, most relevant) · `price` (cheapest first) · `expensive` (dearest first) · `newest` (newest first) · `sellers` (most sellers) |
 | `category` | string | Torob category id, from `suggested_categories` or `browse_categories` |
@@ -208,7 +208,7 @@ Rank what is **actually buyable** under a budget.
 
 | Param | Type | Required | Notes |
 |---|---|---|---|
-| `query` | string | **yes** | The item the user wants |
+| `query` | string | **yes** | The item the user wants. A نیم‌فاصله is searched as a space |
 | `budget_toman` | number | no | Maximum price in Toman. Unset = just rank in stock |
 | `sort` | string | no | Any of `popularity`, `price`, `expensive`, `newest`, `sellers` (default `popularity`) |
 | `include_delivery` | boolean | no | Also read stated postage for the cheapest picks (up to 3) and report the delivered price. Costs extra upstream requests |
@@ -296,7 +296,7 @@ List the sub-categories of a category id, one level at a time. Torob has no "all
 | Param | Type | Required | Notes |
 |---|---|---|---|
 | `id` | string | **yes** | Parent category id. **`1` is the top level** |
-| `limit` | number | no | How many children (default 20, max 30) |
+| `limit` | number | no | How many children (default 20, max 30). **Enforced on the answer**: this endpoint ignores `size` upstream, so the cap is applied here - `count` describes what came back, and `has_more` says whether it may have been more |
 
 Returns `parent_id`, `count`, `categories[]`, and `next` telling you where to go next. Each category: `id`, `title`, `slug`, `image`, `url`, `product_count`, `has_children`, `parent_id`.
 

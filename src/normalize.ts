@@ -22,6 +22,31 @@ export function foldKey(v: unknown): string {
   return faFold(str(v)).toLowerCase();
 }
 
+// The one thing Torob's search index does NOT fold on its own.
+//
+// foldKey above deliberately does not rewrite the query sent upstream: measured,
+// the Arabic yeh and Persian digits come back as the same 1200 results, so
+// Torob matches those variants itself. The joiners are different. Measured
+// 2026-10-04, `لپ‌تاپ ایسر` (U+200C) returned 0 results while `لپ تاپ ایسر`
+// returned 1200 - and Torob's own suggestion for the empty answer was the
+// spaced form, so that is what its index holds.
+//
+// One string, no extra request, applied only where that was measured: the
+// product search and the autocomplete that suggests for it. The directory
+// endpoints (`find_shops`, `list_locations`) are left alone on purpose - a
+// city like نیک‌شهر may well be stored joined there, and a name search is an
+// exact match rather than a tokenised one, so guessing would risk breaking
+// something that works.
+export function searchTerm(v: unknown): string {
+  // U+200C (نیم‌فاصله) and U+200D (the zero-width joiner) are joiners, not
+  // spaces, and neither separates a token for the index. Written through
+  // String.fromCharCode rather than as literal characters: a raw joiner is
+  // invisible in an editor and does not survive a copy.
+  let s = str(v);
+  for (const code of [0x200c, 0x200d]) s = s.split(String.fromCharCode(code)).join(" ");
+  return s.replace(/\s+/g, " ").trim();
+}
+
 export function str(v: unknown, fallback = ""): string {
   // Ids and codes arrive as numbers from some endpoints and as strings from
   // others - province/city ids are numeric upstream, product ids are strings.

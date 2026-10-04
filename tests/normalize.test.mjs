@@ -9,6 +9,7 @@ import {
   num,
   pageClampNote,
   productUrl,
+  searchTerm,
   short,
   str,
   toman,
@@ -148,4 +149,16 @@ test("pageClampNote reports the maximum that was actually applied", () => {
   assert.equal(note.page_clamped, true);
   assert.equal(note.page_requested, 21);
   assert.match(String(note.page_note), /20/);
+});
+
+test("searchTerm drops the joiner, which is the one spelling Torob will not match", () => {
+  // Measured 2026-10-04: 'لپ‌تاپ ایسر' returned 0 results, 'لپ تاپ ایسر'
+  // returned 1200, and Torob's own suggestion for the empty answer was the
+  // spaced form - so that is what its index holds.
+  const joiner = String.fromCharCode(0x200c);
+  assert.equal(searchTerm(`لپ${joiner}تاپ ایسر`), "لپ تاپ ایسر");
+  assert.equal(searchTerm("لپ تاپ ایسر"), "لپ تاپ ایسر", "a query with no joiner is untouched");
+  assert.equal(searchTerm(`قاب${joiner}${joiner}گوشی`), "قاب گوشی", "and the collapsed spaces go too");
+  assert.equal(searchTerm("  قاب   گوشی  "), "قاب گوشی");
+  assert.equal(searchTerm(""), "");
 });

@@ -2,6 +2,19 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
+## 0.5.2 - 2026-10-04
+
+Two findings from running the local server against Torob for real, instead of against stubs.
+
+### Fixed
+
+- **A Persian query with a نیم‌فاصله returned nothing.** Measured: `لپ‌تاپ ایسر` came back with 0 results while `لپ تاپ ایسر` came back with 1200, and Torob's own suggestion for the empty answer was the spaced form - which is what its index holds. The query went upstream byte for byte, so every compound Persian word typed the correct way failed on its first try and had to be retried with a wording the caller never used. The joiner (and the zero-width joiner) is now replaced with a space on the way out, for the product search and the autocomplete that suggests for it. It is one string, not an extra request, and a query without a joiner is byte-identical afterwards, so the two spellings now also share one cache entry. The answer still echoes the caller's own wording. The directory endpoints are deliberately untouched: a city name may well be stored joined there and a name search is an exact match, so guessing would risk breaking what works.
+- **`browse_categories` ignored the `limit` it advertised.** Measured: `limit: 5` came back with 22 rows, because this endpoint does not honour `size` upstream and the tool returned whatever arrived. Every other list in the server slices to its limit; this one was the exception, and a limit nobody enforces is a promise the schema should not make. The cap is now applied to the answer, `count` describes what came back, and `has_more` still says whether it may have been more.
+
+### Changed
+
+- The `query` parameter on `search_products`, `find_best_value` and `torob_suggest` says what happens to a نیم‌فاصله, so an agent does not have to discover it by getting nothing back.
+
 ## 0.5.1 - 2026-10-04
 
 ### Fixed

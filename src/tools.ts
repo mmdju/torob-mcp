@@ -58,7 +58,12 @@ export interface ToolDef {
   run: (args: Record<string, unknown>) => Promise<unknown>;
 }
 
-const QUERY = { type: "string", description: "What the user asked for, in their own words. Persian or English." } as const;
+const QUERY = {
+  type: "string",
+  description:
+    "What the user asked for, in their own words. Persian or English. A نیم‌فاصله is searched as a space, " +
+    "which is how Torob's index stores it.",
+} as const;
 
 function usageError(message: string): UpstreamError {
   return new UpstreamError(message, "usage");
@@ -782,7 +787,7 @@ const suggestTool: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
-      query: { type: "string", description: "The words the user actually typed, e.g. 'قاب گوشی' or 'آیفون 13 ارزون'." },
+      query: { type: "string", description: "The words the user actually typed, e.g. 'قاب گوشی' or 'آیفون 13 ارزون'. A نیم‌فاصله is searched as a space." },
     },
     required: ["query"],
   },
@@ -868,10 +873,16 @@ const categoriesTool: ToolDef = {
     if (!id) throw usageError("browse_categories needs a category id. Start with '1' for the top level.");
     const limit = clampLimit(args.limit, 20, 30);
     const found = await categoryChildren(id, limit);
+    // Upstream does not honour `size` on this endpoint - measured: size=5 came
+    // back with 22 rows - so `limit` only steered the has_more guess while the
+    // caller got every row back. Every other list here slices to its limit;
+    // this one was the exception, and a limit nobody enforces is a promise the
+    // schema should not make.
+    const categories = found.categories.slice(0, limit);
     return {
       parent_id: found.parent,
-      count: found.categories.length,
-      categories: found.categories,
+      count: categories.length,
+      categories,
       // A full page means "possibly more", never "definitely more": upstream
       // sends no total here, so a category with exactly `limit` children looks
       // the same as one with twice as many. The note says which kind of answer

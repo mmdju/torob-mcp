@@ -26,6 +26,7 @@ import {
   formatToman,
   num,
   productUrl,
+  searchTerm,
   short,
   str,
   toman,
@@ -963,8 +964,13 @@ export async function searchProducts(opts: SearchOptions): Promise<SearchResult>
 // details path can reuse a search it already paid for instead of asking again.
 async function searchRaw(opts: SearchOptions): Promise<RawSearch> {
   const filters = opts.filters ?? {};
+  // The one place every search goes through - the tool's own query and the
+  // name-search rung alike - so the joined form is what is both keyed and sent.
+  // `opts.q` itself is left alone: the response echoes what the caller asked
+  // for, and every other key built from it stays consistent.
+  const q = searchTerm(opts.q);
   const key = searchKey(
-    opts.q,
+    q,
     opts.page,
     opts.sort,
     opts.category ?? "",
@@ -975,7 +981,7 @@ async function searchRaw(opts: SearchOptions): Promise<RawSearch> {
   );
   return cached(key, TTL.search, () => {
     const params = new URLSearchParams({
-      q: opts.q,
+      q,
       // Torob pages upstream are 0-based; this server takes 1-based pages.
       page: String(Math.max(0, opts.page - 1)),
       size: "24",
@@ -2088,7 +2094,7 @@ const NON_PRODUCT_SUGGESTION_TYPES = new Set(["business_profile_query"]);
 
 export async function suggestTerms(q: string): Promise<{ query: string; suggestions: string[]; dropped: number }> {
   const raw = await cached(`sg:${foldKey(q)}`, TTL.suggest, () =>
-    torobGet<unknown>(`/suggestion2/?q=${encodeURIComponent(q)}&source=next_desktop`)
+    torobGet<unknown>(`/suggestion2/?q=${encodeURIComponent(searchTerm(q))}&source=next_desktop`)
   );
   const out: string[] = [];
   let dropped = 0;
