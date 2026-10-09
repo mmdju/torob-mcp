@@ -19,8 +19,17 @@ class_name = "RateLimiter"
 tag = "v1"
 new_sqlite_classes = ["RateLimiter"]
 
-# One thing worth knowing: Torob's edge answers data-centre clients with an
-# arCAPTCHA page (HTTP 490) instead of JSON. Requests are expected to be
-# answered from a Cloudflare Worker's own egress, which is not challenged -
-# see src/http.ts for how a 490 is turned into an actionable error rather
-# than an empty result.
+# One thing worth knowing: Torob's edge answers clients it scores as bots with an
+# arCAPTCHA page (HTTP 490) instead of JSON, and it scores them by where the call
+# comes from. Measured 2026-10-09: an ordinary connection answered every request
+# shape and twelve searches 1.5s apart, while this network was challenged on its
+# third call of the minute - and a Worker's subrequests carry Cloudflare's own
+# `Cf-Worker` header, which cannot be stripped. See src/http.ts for how a 490 is
+# turned into an actionable error rather than an empty result.
+#
+# Optional, for a copy that keeps being challenged: send every upstream call
+# through a relay of your own. An unusable value stops the Worker with the
+# reason instead of quietly falling back to Torob.
+#
+# [vars]
+# TOROB_API_BASE = "https://relay.example"
