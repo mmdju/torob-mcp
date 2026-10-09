@@ -96,6 +96,7 @@ const expected = [
   "list_locations",
   "price_history",
   "product_details",
+  "product_guide",
   "search_by_image",
   "search_products",
   "shop_profile",

@@ -62,9 +62,13 @@ test("node dist/index.js serves MCP over stdio and creates its store", async () 
   const send = (obj) => child.stdin.write(`${JSON.stringify(obj)}\n`);
   const request = (id, method, params) =>
     new Promise((resolve, reject) => {
+      // Generous on purpose: this file runs beside eighteen others, and a cold
+      // `node dist/index.js` spawn under that load can take a few seconds before
+      // it answers. A tight budget failed here while the server was fine, which
+      // is how a real break later gets mistaken for the usual flake.
       const timer = setTimeout(
-        () => reject(new Error(`no answer to ${method}. stderr: ${stderr || "(empty)"}`)),
-        5000
+        () => reject(new Error(`no answer to ${method} within 15s. stderr: ${stderr || "(empty)"}`)),
+        15_000
       );
       pending.set(id, (msg) => {
         clearTimeout(timer);
@@ -86,7 +90,7 @@ test("node dist/index.js serves MCP over stdio and creates its store", async () 
 
     const list = await request(2, "tools/list", {});
     assert.equal(list.error, undefined, `tools/list failed: ${JSON.stringify(list.error)}`);
-    assert.equal(list.result.tools.length, 14, "the local server offers the same fourteen tools");
+    assert.equal(list.result.tools.length, 15, "the local server offers the same fifteen tools");
     assert.ok(
       list.result.tools.every((t) => t.annotations?.readOnlyHint === true),
       "and every one of them is still read-only"

@@ -120,6 +120,25 @@ The series labels are Torob's own (average and lowest), so quote them. Today's
 price comes from `product_details` - putting the two side by side is the honest
 "buy now or wait" answer.
 
+## "این محصول به درد من می‌خوره؟"
+
+The chart says what it cost; Torob's own guide says what it is.
+
+```
+product_guide { "prk": "ca10472a-…", "details_url": "…" }
+→ title: "هدفون جی بی ال مدل Tune 510 BT"
+  sections: [ { heading: "نقاط قوت", text: "…" },
+              { heading: "نقاط ضعف", text: "…" },
+              { heading: "نظر خریداران", text: "…" } ]
+  text_length: 3395
+  guide_url: "https://torob.com/p/ca10472a-…/"
+```
+
+The headings and the wording are Torob's own, so quote them instead of turning
+them into a verdict of your own. A product with no guide comes back with an
+empty `sections[]` and a note saying so - that is Torob having nothing to say,
+not a reason to write a review yourself.
+
 ## "این فروشنده معتبره؟"
 
 Every offer carries a `shop_id`; that is the door into the shop's own profile.

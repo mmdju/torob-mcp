@@ -26,7 +26,7 @@ Agents running in a browser work too - the endpoint answers CORS preflights (`OP
 
 ### Or run it on your own machine
 
-The same fourteen tools as a **local process** - no endpoint of ours, no rate limit of ours. What a run learns goes in `~/.torob-mcp/state.json`: the product names and links it found, and the wall it is waiting out. A restart keeps both; deleting that file starts you over.
+The same fifteen tools as a **local process** - no endpoint of ours, no rate limit of ours. What a run learns goes in `~/.torob-mcp/state.json`: the product names and links it found, and the wall it is waiting out. A restart keeps both; deleting that file starts you over.
 
 One line - the first run is slower because npm builds it, and `git` must be installed, since one dependency (`fa-text-utils`) is fetched from a git repository:
 
@@ -53,13 +53,14 @@ cd torob-mcp && npm install      # the prepare script builds dist/
 }
 ```
 
-## 14 tools
+## 15 tools
 
 | Tool | What it answers |
 |---|---|
 | `torob_suggest` | Vague wording to **the search terms Torob itself suggests** |
 | `search_products` | "Show me X", price checks - **filters, sorting, paging, price window**, plus every filter that search accepts |
 | `product_details` | One product plus **every seller's offer** - online and **in person** - with the spec tables and the full price window |
+| `product_guide` | "Should I buy this?" - **Torob's own write-up** of one model: what it is, its strengths and weaknesses, what buyers said |
 | `price_history` | "Is now a good time to buy?" - Torob's **own price chart**, month by month, and when it last moved |
 | `similar_products` | "That one is too expensive, what else?" |
 | `compare_products` | "Which of these?" - **only what actually differs**, plus the price spread |
@@ -78,6 +79,7 @@ Notes for agent builders:
 
 - **All prices are in Toman** (1 Toman = 10 Rial). Prices, stock and shop grades **move constantly** - always link the product URL so the user can confirm before buying.
 - **A search card is one price - the cheapest offer.** `product_details` is the call that lists every seller, and the `price_spread_toman` between them is the whole reason a price-comparison source exists. It also returns the shops that sell the product **in person** (`in_person_sellers`), with each shelf price's `last_price_change_date` - a shop price can be months old, so say how old it is.
+- **A seller's `url` is the shop's page on torob.com**, not the link Torob's own buy button uses: that one is an `api.torob.com` redirect with tracking and a session id on it, and it travels separately as `buy_url`. Keep `url` in the answer to the user, and reach for `buy_url` only when they are about to click through.
 - **`price_history` is the honesty check on a price.** Compare today's cheapest offer with what Torob charts for the product; the series labels are Torob's own, so quote them rather than inventing a trend.
 - **`price_toman: null` means not available** - out of stock upstream, or no price at all. It is never 0, and **0 is never free**: Torob's own "not for sale" comes back as `available: false`.
 - **`price_unreliable: true` is Torob saying that price cannot be trusted.** Pass the warning on; do not present it as a bargain.
@@ -111,7 +113,7 @@ flowchart LR
 What this means:
 
 - **Stateless.** Every request stands alone - no sessions, no accounts, nothing to log in to.
-- **Read-only.** All 14 tools carry `readOnlyHint`. Nothing here can change, delete or order anything, and no shop is ever contacted.
+- **Read-only.** All 15 tools carry `readOnlyHint`. Nothing here can change, delete or order anything, and no shop is ever contacted.
 - **Projected, not passed through.** A Torob search page is roughly 70KB of ranking metadata and experiment plumbing. Every tool returns a compact record built by the server's projection layer instead, with the seller list as a first-class `offers[]` array rather than a flattened string.
 - **No user data.** Nothing about you is stored. What the server does keep: a short-lived response cache and a small map of product ids it handed out, so an id can be resolved back to its seller list.
 - **Rate-aware by necessity.** Torob does not throttle with a 429 - it answers a client that calls too fast with a **bot challenge**. Upstream calls run one at a time with a 1.5s gap, and a challenge closes a gate that the whole server shares instead of opening a retry storm - so the calls behind it spend no request at all.
@@ -144,7 +146,7 @@ Torob's public web API (**undocumented, may change without notice**). This proje
 
 ## Status
 
-**Free public service** on Cloudflare Workers, read-only and keyless. This hosted copy answers **at most 20 `/mcp` calls a minute per client IP** - the fourteen tools take fourteen calls, plus the product and shop lookups they lead to, so an ordinary conversation stays inside it while a script cannot use the service as an unmetered price API. Over the limit you get HTTP 429 with a `retry-after` header; **running the server yourself has no limit at all**. Separately, the pacing this server applies is to **Torob**, not to you, because Torob challenges a caller that goes too fast. See [SECURITY.md](SECURITY.md).
+**Free public service** on Cloudflare Workers, read-only and keyless. This hosted copy answers **at most 20 `/mcp` calls a minute per client IP** - the fifteen tools take fifteen calls, plus the product and shop lookups they lead to, so an ordinary conversation stays inside it while a script cannot use the service as an unmetered price API. Over the limit you get HTTP 429 with a `retry-after` header; **running the server yourself has no limit at all**. Separately, the pacing this server applies is to **Torob**, not to you, because Torob challenges a caller that goes too fast. See [SECURITY.md](SECURITY.md).
 
 ## License
 

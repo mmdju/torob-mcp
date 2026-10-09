@@ -74,10 +74,10 @@ async function using(fn) {
   }
 }
 
-test("tools/list over the wire offers the fourteen tools without touching upstream", async () => {
+test("tools/list over the wire offers the fifteen tools without touching upstream", async () => {
   await using(async (client) => {
     const listed = await client.listTools();
-    assert.equal(listed.tools.length, 14);
+    assert.equal(listed.tools.length, 15);
     assert.equal(fetchCalls, 0, "listing the tools must never cost an upstream request");
   });
 });

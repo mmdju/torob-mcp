@@ -9,7 +9,7 @@ import { UpstreamError } from "./http.js";
 import { setWaitUntil, type WaitUntil } from "./project.js";
 import { READ_ONLY, TOOLS } from "./tools.js";
 
-export const VERSION = "0.5.3";
+export const VERSION = "0.5.4";
 
 // Server-level guidance: cheaper than repeating it in every tool description,
 // and it steers the agent before it picks a tool at all. It is the first thing
@@ -25,7 +25,7 @@ export const INSTRUCTIONS = [
   "or the word 'best', shop_profile when the seller itself is the question, find_shops to locate a shop by name " +
   "or city, search_by_image when the user shares a picture link, torob_trends for what shoppers are searching " +
   "right now, browse_categories to walk the category tree, list_locations for province and city " +
-  "ids, special_offers for the deals Torob is featuring.",
+  "ids, special_offers for the deals Torob is featuring, product_guide for Torob's own write-up of one model.",
   "A search card carries the CHEAPEST offer only, not every seller. To answer 'who sells this' or " +
   "'is that shop reliable' call product_details - that is where the full seller list, shop scores and " +
   "vote counts live - and shop_profile for the shop behind any offer's shop_id.",
@@ -39,6 +39,10 @@ export const INSTRUCTIONS = [
   "search_by_image takes a public image URL and nothing else, and its matched_product names the one product Torob " +
   "recognised in the picture, when it recognised one. shop_profile's include_products lists a shop's own " +
   "catalogue; pair it with the shop_id from a product_details offer.",
+  "product_guide reads Torob's own guide for one product - what the model is, its strengths and weaknesses, what " +
+  "buyers said and who it suits - for the 'should I buy this?' question a price chart alone does not answer. It " +
+  "is text, not a seller list, and not every product has one: an empty answer is Torob having no guide, so never " +
+  "compose a summary of your own in its place.",
   "Every search returns available_filters - the filter groups that search really accepts, with their " +
   "slugs and the values each takes. Pass those values back in filters, or use min_price_toman / " +
   "max_price_toman for a price window. Torob ignores a slug or value it does not know and answers " +

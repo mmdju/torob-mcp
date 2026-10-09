@@ -29,6 +29,7 @@ import {
   findShops,
   popularCities,
   productDetails,
+  productGuide,
   productLastModified,
   productPriceChanges,
   productPriceChart,
@@ -469,6 +470,9 @@ const detailsTool: ToolDef = {
       name_en: found.name_en,
       cheapest_price_toman: found.price_toman,
       available: found.available,
+      // Torob's own reason when it says the product cannot be bought - the price
+      // on it is then history, not an offer.
+      ...(found.availability_note ? { availability_note: found.availability_note } : {}),
       image: found.image,
       badges: found.badges,
       url: found.url,
@@ -1271,10 +1275,68 @@ const trendsTool: ToolDef = {
   },
 };
 
+// ------------------------------------------------------------------- guide
+
+const guideTool: ToolDef = {
+  name: "product_guide",
+  title: "Torob's own guide for one product",
+  description:
+    "Torob's write-up of one product: what the model is, its strengths and weaknesses, what buyers said and who it " +
+    "suits - the article Torob shows on the product page above the specs. This is the 'should I buy this?' reading " +
+    "when a price chart alone does not answer it. It is text, not a seller list: use product_details for the offers " +
+    "behind a price and price_history for the chart. Pass the prk from a search_products card together with that " +
+    "card's details_url. Not every product has a guide, and an empty answer says so rather than inventing a summary.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      prk: { type: "string", description: "Product id from a search_products card (or a torob.com /p/<id>/ URL)." },
+      details_url: {
+        type: "string",
+        description: "The details_url from the same card, so the id resolves with no lookup.",
+      },
+      max_chars: {
+        type: "number",
+        description: "How much of the guide to return as text (default 4000, max 8000 characters).",
+      },
+    },
+    required: ["prk"],
+  },
+  async run(args) {
+    const prk = str(args.prk).trim();
+    if (!prk) throw usageError("product_guide needs a prk - the product id from a search_products card.");
+    const maxChars = clampLimit(args.max_chars, 4000, 8000);
+    const guide = await productGuide(prk, maxChars, { detailsUrl: args.details_url });
+    return {
+      prk: guide.prk,
+      title: guide.title,
+      sections: guide.sections,
+      text_length: guide.text_length,
+      ...(guide.truncated
+        ? {
+            truncated: true,
+            note:
+              `The guide holds ${guide.text_length} character(s) of text; this answer carries the first part of it. ` +
+              `Raise max_chars (max 8000) for the rest.`,
+          }
+        : {}),
+      ...(guide.sections.length === 0
+        ? {
+            note:
+              "Torob has no guide for this product yet - that is nothing to read rather than a summary of other " +
+              "products, so do not write one in its place. product_details still answers about its price and sellers.",
+          }
+        : {}),
+      guide_url: guide.guide_url,
+      attribution: guide.attribution,
+    };
+  },
+};
+
 export const TOOLS: ToolDef[] = [
   suggestTool,
   searchTool,
   detailsTool,
+  guideTool,
   priceHistoryTool,
   similarTool,
   compareTool,

@@ -51,7 +51,16 @@ export interface Offer {
   free_shipping: boolean | null;
   payment_on_delivery: boolean | null;
   same_day_delivery: string | null;
+  /** The shop's page on torob.com, e.g. https://torob.com/shop/392309/. */
   url: string | null;
+  /**
+   * Torob's own click-through link (the site's "خرید اینترنتی" button). It is an
+   * api.torob.com redirect carrying tracking parameters and a session id, so it
+   * is kept apart from `url` instead of being handed over as the shop's address.
+   */
+  buy_url: string | null;
+  /** Torob's own sentence about this seller, when it sent one. */
+  shop_note: string | null;
   /** Torob's own ad flag for this offer. */
   is_adv: boolean;
   /** Torob's postage line as sent, e.g. "هزینه ارسال ۷۰٫۰۰۰ تومان". */
@@ -122,6 +131,8 @@ export interface ProductDetails extends ProductCard {
   purchase_options?: PurchaseOption[];
   is_authentic?: true;
   has_wiki?: true;
+  /** Torob's own reason for reporting availability differently than the price. */
+  availability_note?: string;
   attribution: string;
 }
 
@@ -163,6 +174,8 @@ interface RawProduct {
   price?: unknown;
   price_text?: unknown;
   stock_status?: unknown;
+  availability?: unknown;
+  is_accessible?: unknown;
   image_url?: unknown;
   image_count?: unknown;
   web_client_absolute_url?: unknown;
@@ -203,6 +216,13 @@ export interface RawSearch {
   filters1?: unknown[];
   filters2?: unknown[];
   attributes?: unknown[];
+  /**
+   * The modern name for the same list, sent beside the three above and empty on
+   * every live search measured (2026-10-09). Read as a fourth source so a
+   * rename upstream cannot quietly turn the whole filter surface into "this
+   * search takes no filters".
+   */
+  available_filters?: unknown[];
   spellcheck?: unknown;
   has_visible_result?: unknown;
 }
@@ -211,6 +231,24 @@ export interface RawSearch {
 
 // A shop score without votes behind it is noise. Reporting 5.0 from two votes
 // would make an agent recommend a shop it knows nothing about.
+// Torob's own grade for an in-person shop (measured live: 5, 4, 3) - the badge
+// the site shows beside the shop's name in its "فروشگاه‌های حضوری" list. It is a
+// trust grade from Torob and not the 0-5 shopper score an offer carries, which
+// is why it has its own reader instead of reusing shopScore.
+function trustGradeOf(score: unknown): number | null {
+  const s = num(score, NaN);
+  return Number.isFinite(s) && s > 0 ? Math.round(s * 10) / 10 : null;
+}
+
+// Torob's own sentence about a seller, when it sends one. The site shows it
+// under the shop's grade; `score_info.summary` is the readable half of it.
+function scoreNoteOf(raw: unknown): string | null {
+  const info = (raw as { score_info?: { score_text?: unknown; complaints_info?: { summary?: unknown } } } | null)?.score_info;
+  const summary = info?.complaints_info?.summary;
+  const first = Array.isArray(summary) ? summary[0] : summary;
+  return short(first ?? info?.score_text, 200);
+}
+
 function shopScore(score: unknown, votes: unknown): number | null {
   const v = Math.max(0, Math.round(num(votes, 0)));
   const s = num(score, 0);
@@ -272,6 +310,35 @@ function prkInUrl(url: string): string | null {
   }
 }
 
+// Torob's own verdict on availability when it sends a boolean, and the
+// price-derived guess otherwise. The search row carries `stock_status` (an empty
+// string on every row measured on 2026-10-09) while the product page carries
+// `availability` as a real boolean, so the boolean is what is trusted and the
+// price stays as the fallback rather than being thrown away.
+function availabilityOf(row: RawProduct, price: number | null): boolean {
+  return typeof row.availability === "boolean" ? row.availability : availableFrom(price);
+}
+
+// The product page's own word on whether this product can be bought, plus the
+// reason when it says no. A product Torob has taken out of reach must not be
+// handed to a caller as buyable because a stale price is still on it.
+function upstreamAvailabilityOf(raw: RawProduct): { available: boolean | null; note: string | null } {
+  if (raw.is_accessible === false) {
+    return {
+      available: false,
+      note:
+        "Torob marks this product as not accessible (withdrawn or hidden), so it is reported as out of " +
+        "stock whatever its price says.",
+    };
+  }
+  if (typeof raw.availability === "boolean") {
+    return raw.availability
+      ? { available: true, note: null }
+      : { available: false, note: "Torob reports this product as unavailable right now." };
+  }
+  return { available: null, note: null };
+}
+
 export function toCard(row: RawProduct): ProductCard | null {
   const prk = str(row.random_key).trim();
   if (!prk) return null;
@@ -282,7 +349,7 @@ export function toCard(row: RawProduct): ProductCard | null {
     name_en: short(row.name2, 160),
     price_toman: price,
     price_text: short(row.price_text, 80) ?? (price !== null ? `${formatToman(price)} تومان` : null),
-    available: availableFrom(price),
+    available: availabilityOf(row, price),
     shop_name: short((row as any).shop_text, 80),
     image: short(row.image_url, 300),
     image_count: Math.max(0, Math.round(num(row.image_count, 0))),
@@ -387,10 +454,11 @@ function toOffer(raw: RawOffer): Offer | null {
   const postage = postageOf(raw);
   const guarantee = short((raw.guarantee_info as { status?: unknown } | null | undefined)?.status, 20);
   const percentile = num(raw.shop_score_percentile, NaN);
+  const shopId = str(raw.shop_id).trim();
   return {
     shop_name: shop,
     shop_city: short(raw.shop_name2, 60),
-    shop_id: str(raw.shop_id).trim() || null,
+    shop_id: shopId || null,
     shop_score: shopScore(raw.shop_score, raw.shop_votes_count),
     shop_votes: Math.max(0, Math.round(num(raw.shop_votes_count, 0))),
     price_toman: price,
@@ -401,7 +469,13 @@ function toOffer(raw: RawOffer): Offer | null {
     free_shipping: more.free_shipping === undefined ? null : more.free_shipping === true,
     payment_on_delivery: more.payment_on_delivery === undefined ? null : more.payment_on_delivery === true,
     same_day_delivery: short(more.same_day_delivery, 120),
-    url: str(raw.page_url).startsWith("http") ? str(raw.page_url) : null,
+    // A stable, human address: the shop on torob.com. The link Torob's own buy
+    // button uses is an api.torob.com redirect with ~400 characters of tracking
+    // around its session id, so it travels as `buy_url` and never as the shop's
+    // address.
+    url: shopId ? `https://torob.com/shop/${shopId}/` : (str(raw.page_url).startsWith("http") ? str(raw.page_url) : null),
+    buy_url: str(raw.page_url).startsWith("http") ? str(raw.page_url) : null,
+    shop_note: scoreNoteOf(raw),
     is_adv: raw.is_adv === true,
     postage_text: postage.text,
     postage_fee_toman: postage.fee,
@@ -464,16 +538,16 @@ export interface InPersonSeller {
    */
   last_price_change_date: string | null;
   fast_delivery: boolean;
-  location: { lat: number; lon: number } | null;
+  /**
+   * Torob's own grade for this shop in the in-person list (measured live: 5, 4,
+   * 3 on one product) - the badge the site shows beside the shop's name. It is
+   * Torob's trust grade, not the 0-5 shopper score an offer carries.
+   */
+  score: number | null;
+  /** Torob's own line for that grade, e.g. "خرید حضوری". */
+  score_note: string | null;
   /** The shop's page on torob.com, where its details live. */
   url: string;
-}
-
-function locationOf(raw: any): { lat: number; lon: number } | null {
-  const lat = num(raw?.lat, NaN);
-  const lon = num(raw?.lon, NaN);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  return { lat, lon };
 }
 
 function toInPersonSeller(raw: any): InPersonSeller | null {
@@ -495,7 +569,12 @@ function toInPersonSeller(raw: any): InPersonSeller | null {
     hours_status: short(raw?.working_hours?.title?.status, 20),
     last_price_change_date: short(raw?.last_price_change_date, 60),
     fast_delivery: raw?.supports_fast_delivery === true,
-    location: locationOf(raw?.location),
+    // No coordinates here: measured on a live product, none of the 84 in-person
+    // rows carried a `location` at all - the coordinates live behind the map
+    // endpoint, whose link this projection hands out as `in_person_map_url`.
+    // The old field promised lat/lon and was always null, so it is gone.
+    score: trustGradeOf(raw?.score_info?.score),
+    score_note: scoreNoteOf(raw),
     url: shopId
       ? `https://torob.com/shop/${shopId}/`
       : `https://torob.com/p/${str(raw?.prk).trim()}/`,
@@ -809,7 +888,7 @@ function brandOf(item: unknown): { value: string; slug: string } {
 }
 
 function filterGroupsOf(raw: RawSearch): FilterGroup[] {
-  const out: FilterGroup[] = [];
+  const out = new Map<string, FilterGroup>();
   const brief = (g: any) => {
     const slug = str(g?.slug).trim();
     if (!slug) return null;
@@ -839,12 +918,57 @@ function filterGroupsOf(raw: RawSearch): FilterGroup[] {
       ...(str(g?.url) ? { values_url: str(g.url) } : {}),
     } satisfies FilterGroup;
   };
-  for (const group of [...(raw.filters1 ?? []), ...(raw.filters2 ?? []), ...(raw.attributes ?? [])]) {
+  // Every source this response carries the groups in. Torob sends the same
+  // groups more than once - measured on a live search (2026-10-09): 18 groups
+  // arrived across these lists and only 12 of them were unique (brand, usage,
+  // type, bluetooth_version, shop_type and stock_status each came twice, byte
+  // for byte). One group per slug survives, so the caller is not handed the same
+  // list twice and an agent never has to guess which copy is authoritative.
+  const sources = [
+    ...(raw.filters1 ?? []),
+    ...(raw.filters2 ?? []),
+    ...(raw.attributes ?? []),
+    // Its modern name, already sent beside the others and empty today. Reading
+    // it means a rename upstream cannot quietly drop the whole filter surface.
+    ...(raw.available_filters ?? []),
+  ];
+  let rows = 0;
+  for (const group of sources) {
     if (!group || typeof group !== "object") continue;
+    rows += 1;
     const b = brief(group);
-    if (b) out.push(b);
+    if (!b) continue;
+    const kept = out.get(b.slug);
+    if (!kept) {
+      out.set(b.slug, b);
+      continue;
+    }
+    // The first copy keeps its place in the list; a later one only fills what
+    // the kept copy lacks (values, the group's own URL).
+    out.set(b.slug, {
+      ...kept,
+      title: kept.title || b.title,
+      type: kept.type === "unknown" ? b.type : kept.type,
+      values: Math.max(kept.values, b.values),
+      ...(b.options && !kept.options ? { options: b.options } : {}),
+      ...((kept.options_truncated || b.options_truncated) && (kept.options || b.options)
+        ? { options_truncated: true }
+        : {}),
+      ...(kept.values_url || b.values_url ? { values_url: kept.values_url ?? b.values_url } : {}),
+    });
   }
-  return out;
+  // Rows that exist and cannot be read are not "this search takes no filters".
+  // The same rule the location endpoints follow, for the same reason: an empty
+  // list reads as a real answer while a wrong field name is a bug.
+  if (out.size === 0 && rows > 0) {
+    throw new UpstreamError(
+      `Torob answered this search with ${rows} filter group(s) this server could not read. The API shape ` +
+        `may have changed, so this is reported instead of an empty filter list - "this search takes no ` +
+        `filters" would be a different answer.`,
+      "http"
+    );
+  }
+  return [...out.values()];
 }
 
 // The filter keys a response says it accepts: each group's own slug, plus the
@@ -1331,6 +1455,11 @@ export async function productDetails(
   if (!base) {
     throw new UpstreamError("Torob returned a product page with no product in it.", "http");
   }
+  // The product page's own verdict on availability, which is a real boolean
+  // here (measured: `availability: true` at the top level of the payload), and
+  // the reason when it says no. The price-derived guess on the card is what
+  // falls back when Torob stays silent.
+  const upstreamAvailability = upstreamAvailabilityOf(raw);
 
   const prices = offers.filter((o) => o.available && o.price_toman !== null).map((o) => o.price_toman as number);
   // "Best rated" is the highest score, not the first scored offer in a list
@@ -1369,6 +1498,8 @@ export async function productDetails(
 
   return {
     ...base,
+    ...(upstreamAvailability.available === null ? {} : { available: upstreamAvailability.available }),
+    ...(upstreamAvailability.note ? { availability_note: upstreamAvailability.note } : {}),
     offers,
     offer_count: offers.length,
     price_spread_toman: prices.length > 1 ? Math.max(...prices) - Math.min(...prices) : null,
@@ -2110,4 +2241,144 @@ export async function suggestTerms(q: string): Promise<{ query: string; suggesti
     }
   }
   return { query: q, suggestions: [...new Set(out)].slice(0, 10), dropped };
+}
+
+// ------------------------------------------------------------------- guide
+
+/**
+ * Torob's own guide for a product ("راهنمای جامع محصول"), the article the site
+ * shows above the specs: an introduction to the model, its strengths and
+ * weaknesses, what buyers said and who the product suits. Verified live on
+ * 2026-10-09: `/v4/base-product/wiki/` answered 200 with 9.2KB of HTML for a
+ * product whose details payload said only `has_wiki: true`.
+ */
+export interface GuideSection {
+  /** Torob's own heading, e.g. "نقاط قوت"; null for text before the first one. */
+  heading: string | null;
+  text: string;
+}
+
+export interface ProductGuide {
+  prk: string;
+  /** The product's name as the guide titles it. */
+  title: string | null;
+  sections: GuideSection[];
+  /** How many characters the whole guide holds, before the requested cap. */
+  text_length: number;
+  truncated: boolean;
+  /** The product page, where this guide is rendered. */
+  guide_url: string;
+  attribution: string;
+}
+
+// The guide is an article, not a record: a caller may ask for all of it, and the
+// default keeps a product's pros and cons inside the kind of context budget the
+// rest of the server respects. The numbers themselves live in tools.ts, next to
+// the schema that advertises them (tests/agent-surface.test.mjs compares the two).
+// h1 is the product's name - the same string the payload carries as `name1` -
+// so it is read as a title and stripped out, while h2-h4 are the article's own
+// sections (measured live: معرفی محصول، مشخصات، نقاط قوت، نقاط ضعف …).
+const GUIDE_HEADING_RE = /<(h[2-4])[^>]*>([\s\S]*?)<\/\1>/gi;
+const GUIDE_H1_RE = /<h1[^>]*>([\s\S]*?)<\/h1>/i;
+
+// A small, deliberately narrow HTML reader: no dependency, and it never returns
+// markup to a caller. The guide is generated HTML with headings, paragraphs,
+// lists and the occasional admonition box, so the conversion is "headings become
+// sections, everything else becomes text".
+const HTML_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+  // The joiners are written by code point: a literal one is invisible in an
+  // editor and does not survive a copy.
+  zwnj: String.fromCharCode(0x200c),
+  zwj: String.fromCharCode(0x200d),
+  "#39": "'",
+  "#x27": "'",
+};
+
+function plainText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|tr|h[1-6]|blockquote)>/gi, "\n")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&([a-z0-9#x]+);/gi, (m, name: string) => HTML_ENTITIES[name.toLowerCase()] ?? m)
+    .replace(/[ \t\u00a0]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function capText(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, Math.max(1, n - 3)).trimEnd()}...` : s;
+}
+
+/**
+ * Project Torob's guide into headings and text. Markup never reaches the caller:
+ * the answer is the article's content, not its HTML.
+ */
+export function guideOf(raw: unknown): { title: string | null; sections: GuideSection[]; text_length: number } {
+  const json = (raw ?? {}) as { data_html?: unknown; name1?: unknown };
+  const html = str(json.data_html);
+  const h1 = short(plainText(str(html.match(GUIDE_H1_RE)?.[1])), 160);
+  const title = short(json.name1, 160) ?? h1;
+  if (!html) return { title, sections: [], text_length: 0 };
+  const body = html.replace(/<h1[^>]*>[\s\S]*?<\/h1>/gi, "");
+  const found = [...body.matchAll(GUIDE_HEADING_RE)];
+  const sections: GuideSection[] = [];
+  const before = plainText(found.length ? body.slice(0, found[0].index ?? 0) : body);
+  if (before) sections.push({ heading: null, text: before });
+  for (let i = 0; i < found.length; i++) {
+    const heading = short(plainText(str(found[i][2])), 120);
+    const from = (found[i].index ?? 0) + found[i][0].length;
+    const to = i + 1 < found.length ? found[i + 1].index ?? body.length : body.length;
+    const text = plainText(body.slice(from, to));
+    if (!heading && !text) continue;
+    sections.push({ heading, text });
+  }
+  const text_length = sections.reduce((n, s) => n + s.text.length, 0);
+  return { title, sections, text_length };
+}
+
+/**
+ * The guide for one product, in text. The id goes through the same ladder every
+ * other product call uses (`confirmedPrk`), so a prk plus the card's
+ * `details_url` opens it with no server-side memory involved.
+ */
+export async function productGuide(
+  prkInput: string,
+  maxChars: number,
+  opts?: ProductDetailsOptions
+): Promise<ProductGuide> {
+  const prk = await confirmedPrk(prkInput, opts);
+  const raw = await cached(`gd:${prk}`, TTL.guide, () =>
+    torobGet<unknown>(`/v4/base-product/wiki/?prk=${encodeURIComponent(prk)}`)
+  );
+  const { title, sections, text_length } = guideOf(raw);
+  const cap = Math.min(Math.max(1, maxChars), 8000);
+  const out: GuideSection[] = [];
+  let used = 0;
+  let truncated = false;
+  for (const section of sections) {
+    if (used >= cap) {
+      truncated = true;
+      break;
+    }
+    const text = capText(section.text, cap - used);
+    used += text.length;
+    if (text.length < section.text.length) truncated = true;
+    out.push({ heading: section.heading, text });
+  }
+  return {
+    prk,
+    title,
+    sections: out,
+    text_length,
+    truncated,
+    guide_url: `https://torob.com/p/${prk}/`,
+    attribution: ATTRIBUTION,
+  };
 }

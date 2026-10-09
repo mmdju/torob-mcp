@@ -2,7 +2,7 @@
 
 Torob MCP is a read-only public service. There is nothing to log in to and no user data is stored.
 
-- All 14 tools are read-only. No tool can change, delete or publish anything, and no shop is ever contacted.
+- All 15 tools are read-only. No tool can change, delete or publish anything, and no shop is ever contacted.
 - No API keys are needed to use the hosted endpoint.
 - The server never signs in to Torob and never solves or evades a bot challenge - a challenge is reported as a clear, actionable error instead.
 - Nothing about a caller is stored: no accounts, no request logs, no query history. The state the server does keep, and why: a short-lived response cache plus a map of product ids it handed out (both scoped to a single isolate); a per-colo cache holding a product's name and details URL for 24 hours and a query's filter groups for 30 minutes, so a second isolate does not pay for a lookup the first one made; and the rate limiter's per-client-IP counter in a Durable Object (below).
@@ -25,7 +25,7 @@ This server treats a challenge as a cooldown, not a failure to retry:
 
 The hosted copy at `torob-mcp.mmdju3.workers.dev` answers at most **20 `POST /mcp` calls a minute per client IP**. Over the limit it returns **HTTP 429** with a JSON-RPC error body, a `retry-after` header and `x-ratelimit-limit` / `x-ratelimit-remaining`, so a client can see where it stands instead of guessing.
 
-Twenty a minute is far above a real conversation: the fourteen tools take fourteen calls, plus the product and shop lookups a conversation leads to, which still lands inside the window. It is low enough that a script cannot use this service as an unmetered price API. The count is kept in a **Durable Object**, one per client IP, so it is exact and the same in every colo instead of being tracked separately by each - a weaker per-colo cache only stands in if that binding is ever missing, which can never fail the request it protects. Only `/mcp` is limited: the landing page, the connect page, the fonts and `/health` keep answering, so a browser is never locked out of the page that explains the limit.
+Twenty a minute is far above a real conversation: the fifteen tools take fifteen calls, plus the product and shop lookups a conversation leads to, which still lands inside the window. It is low enough that a script cannot use this service as an unmetered price API. The count is kept in a **Durable Object**, one per client IP, so it is exact and the same in every colo instead of being tracked separately by each - a weaker per-colo cache only stands in if that binding is ever missing, which can never fail the request it protects. Only `/mcp` is limited: the landing page, the connect page, the fonts and `/health` keep answering, so a browser is never locked out of the page that explains the limit.
 
 **A self-hosted run has no limit.** The limiter lives in `src/rate-limit.ts` and is imported by `src/worker.ts` alone; the server core and the Node entry point do not know it exists.
 

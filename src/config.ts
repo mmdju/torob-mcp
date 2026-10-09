@@ -97,6 +97,9 @@ export const TTL = {
   shops: 60 * MIN, // the directory of businesses barely moves inside an hour
   trends: 60 * MIN, // what shoppers search shifts over hours, not minutes
   image: 30 * MIN,
+  // The guide is an article that changes when Torob rewrites it, not a price:
+  // six hours matches the chart and keeps a one-call tool cheap to repeat.
+  guide: 6 * HOUR,
 };
 
 export const ATTRIBUTION =

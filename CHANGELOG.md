@@ -2,6 +2,29 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
+## 0.5.4 - 2026-10-09
+
+A pass over the whole server against the live site and API - not against fixtures - found one shape that spent a fifth of every search answer on the same list twice, a link that was an API redirect where a shop's page belonged, three fields Torob already sends that never reached the caller, and one thing the site shows that this server only mentioned: Torob's own product guide.
+
+### Added
+
+- **`product_guide`** reads Torob's write-up of one product - what the model is, its strengths and weaknesses, what buyers said and who it suits (`/v4/base-product/wiki/`, verified live: HTTP 200 with 9.2KB of HTML for a product the details payload only flagged `has_wiki: true`). The HTML is turned into headings and text - entities decoded, no markup handed out - and capped at 4000 characters by default, 8000 on request, with `text_length` and `truncated` saying what was left. Cached for six hours, because an article does not move like a price. A product Torob has no guide for comes back with no sections and says so, rather than inviting a summary of its own.
+- The tool is named in the server's own instructions, counted on the landing page, and checked by `scripts/verify-live.mjs` like every other one.
+
+### Fixed
+
+- **Every filter group was sent twice.** Measured on a live "هدفون" search: 18 groups arrived across `filters1`, `filters2` and `attributes` where only 12 were unique - `brand`, `usage`, `type`, `bluetooth_version`, `shop_type` and `stock_status` each came twice, byte for byte. The projection now keeps one group per slug: `available_filters` fell from 4.5KB to 2.6KB on that search, about a fifth of a 21KB answer, and an agent no longer has to guess which copy means anything.
+- **A seller's link was an API redirect.** `offer.url` carried `api.torob.com/v4/product-page/redirect/?...` with roughly 400 characters of tracking around a session id. It is now the shop's stable page on torob.com (`https://torob.com/shop/<shop_id>/`), and Torob's own click-through travels beside it as `buy_url`.
+- **The in-person shops' grade was dropped.** Every one of the 84 rows on the product measured carried Torob's own grade (5, 4, 3) with a line under it, which is what the site shows beside the shop's name. `in_person_sellers[]` now carries `score` and `score_note`, and each offer carries Torob's own sentence about the seller as `shop_note`.
+- **`location` was always null.** None of those 84 rows carried coordinates at all; they live behind the map endpoint, whose link the server already hands out as `in_person_map_url`. The field promised lat/lon and never delivered, so it is gone instead of staying a lie.
+- **Availability was a guess where Torob had an answer.** A card still derives `available` from the price - the search row's `stock_status` is an empty string on every row measured - but the product page's own `availability` boolean now wins when it is sent, and a product Torob marks `is_accessible: false` is reported out of stock with `availability_note` saying why.
+- **A renamed filter field would have read as "no filters".** Torob already sends `available_filters` beside the three lists this server reads - empty today. It is read as a fourth source now, and a search carrying groups this server cannot read raises an error instead of reporting an empty filter surface - the same rule the location endpoints already follow.
+- **The local-server test's five-second budget.** It timed out under the suite's own load (nineteen files at once) while the same server answered `initialize` instantly by hand and passed three times out of three on its own. That is the flake that would have hidden a real break later, so the budget is fifteen seconds now, with the reason written next to it.
+
+### Coverage
+
+- `tests/guide.test.mjs` is the new tool's own suite: headings become sections, entities become characters, no markup reaches the caller, the cap is a real cap, and a missing guide says it is missing rather than being written from scratch.
+
 ## 0.5.3 - 2026-10-04
 
 Found by watching the gate answer the live service instead of by reading it: it kept saying "retry in about 5 minutes" when it was supposed to escalate.
