@@ -16,9 +16,9 @@
 //    "فروشنده‌ها"). That list is the reason a Torob MCP exists at all, so it
 //    gets a first-class shape rather than being flattened into a string.
 
-import { ATTRIBUTION, MIN_SHOP_VOTES, SORT_PARAMS, SOURCE, TOROB_API, TTL, type Sort } from "./config.js";
+import { ATTRIBUTION, MIN_SHOP_VOTES, SORT_PARAMS, SOURCE, TTL, type Sort } from "./config.js";
 import { cacheSet as cachePut, cached, cachedGet } from "./cache.js";
-import { UpstreamError, torobGet } from "./http.js";
+import { torobGet, upstreamBaseUrl, UpstreamError } from "./http.js";
 import { storeGet, storeSet } from "./store.js";
 import {
   availableFrom,
@@ -1328,9 +1328,12 @@ interface ResolvedProduct {
   raw?: RawProduct;
 }
 
-/** The details URL for an id, built from the id alone. */
+// The details URL for an id, built from the id alone. It is built on the same
+// base the calls go out on (http.ts), so a deployment pointed at a relay hands
+// out relay URLs - a caller passing api.torob.com's own URL back would leave the
+// relay and meet the challenge the relay exists to avoid.
 function prkOnlyDetailsUrl(prk: string): string {
-  return `${TOROB_API}/v4/base-product/details/?prk=${encodeURIComponent(prk)}`;
+  return `${upstreamBaseUrl()}/v4/base-product/details/?prk=${encodeURIComponent(prk)}`;
 }
 
 // A product id is only half an address upstream: the details endpoint also wants

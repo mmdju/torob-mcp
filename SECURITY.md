@@ -21,6 +21,10 @@ This server treats a challenge as a cooldown, not a failure to retry:
 - The first stage is five minutes; a repeat challenge earns thirty. Measured 2026-10-04, a block took about twenty-seven minutes to clear, so the probe is spent once per stage rather than once per isolate. A real answer reopens the gate.
 - Upstream calls are serialized with a 1.5s gap, and a challenged response is never cached.
 
+**What the challenge is made on, measured 2026-10-09: the connection, not the request.** From an ordinary connection, five request shapes were all answered - the headers this server ships, a full Chrome header set, the site's own cookies, and no cookies at all - and so were twelve searches 1.5s apart. From Cloudflare's network the same calls were challenged on the third of the minute. A Worker's subrequests also carry Cloudflare's own `Cf-Worker` header, naming the worker, and a header of that name set in the fetch options does not replace it. Nothing here hides that, and nothing should: a hosted copy simply is a datacenter client, and Torob is entitled to score it that way.
+
+**If that keeps happening to your deployment:** run the server yourself (`npx -y github:mmdju/torob-mcp`, where the calls come from your own connection), or set the `TOROB_API_BASE` variable to a relay you control - every upstream call, and every `details_url` the server hands to a caller, is built on that base. Two rules come with it, both enforced in `src/http.ts`: the value must be an **absolute https URL** (a plain-http relay would put every query, price and product id on the wire in the clear), and an unusable value **stops the server with the reason** instead of quietly falling back to Torob. The relay sees every query this server makes - it is your relay, and it should be as trusted as the code here.
+
 ## Rate Limiting
 
 The hosted copy at `torob-mcp.mmdju3.workers.dev` answers at most **20 `POST /mcp` calls a minute per client IP**. Over the limit it returns **HTTP 429** with a JSON-RPC error body, a `retry-after` header and `x-ratelimit-limit` / `x-ratelimit-remaining`, so a client can see where it stands instead of guessing.

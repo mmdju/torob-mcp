@@ -2,12 +2,20 @@
 // Keyless, so there is nothing to wire per request beyond a fresh Server.
 //
 // Torob's edge answers some clients with an arCAPTCHA page (HTTP 490) instead
-// of JSON. A Worker's own egress is not challenged - measured with 8 sequential
-// live searches, all 200 - so a 490 reaching this file means something changed
-// upstream and http.ts turns it into an actionable error rather than an empty
-// result.
+// of JSON, and it scores a client by where the call comes from rather than by
+// what it sends. Measured 2026-10-09: from an ordinary connection, five request
+// shapes (this server's headers, a full Chrome set, the site's own cookies, and
+// no cookies) all answered JSON, as did twelve searches 1.5s apart; from
+// Cloudflare's network, three calls in a minute drew a 274KB challenge page.
+// A Worker's subrequests also carry Cloudflare's `Cf-Worker` header, which
+// names the worker and cannot be stripped. So a hosted copy will be challenged
+// from time to time whatever this file does: http.ts turns a 490 into an
+// actionable error rather than an empty result, keeps the calls behind it from
+// spending requests, and can be pointed at a relay the operator controls with
+// the TOROB_API_BASE variable below.
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { FONT_BIN } from "./fonts.js";
+import { setUpstreamBase } from "./http.js";
 import { LANDING, MCP_PAGE } from "./landing.js";
 import { OG_IMAGE } from "./og-image.js";
 import {
@@ -92,6 +100,8 @@ interface WorkerContext {
 // colo cache rather than failing the request it was meant to protect.
 interface WorkerEnv {
   RATE_LIMITER?: DurableObjectNamespaceLike;
+  /** Optional relay for upstream calls - see setUpstreamBase in http.ts. */
+  TOROB_API_BASE?: string;
 }
 
 // The parts of a Durable Object this file uses, typed structurally: the project
@@ -125,6 +135,17 @@ export class RateLimiter {
 export default {
   async fetch(req: Request, env?: WorkerEnv, ctx?: WorkerContext): Promise<Response> {
     const url = new URL(req.url);
+    try {
+      setUpstreamBase(env?.TOROB_API_BASE);
+    } catch (err) {
+      // A misconfigured relay must not look like Torob being down: name it.
+      return withCors(
+        new Response(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        })
+      );
+    }
     if (req.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }

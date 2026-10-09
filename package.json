@@ -1,7 +1,7 @@
 {
   "name": "torob-mcp",
   "private": true,
-  "version": "0.5.4",
+  "version": "0.5.5",
   "license": "MIT",
   "bin": {
     "torob-mcp": "bin/torob-mcp.js"
@@ -31,7 +31,7 @@
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "serve": "node dist/index.js --http",
-    "test": "npm run build && node --test tests/normalize.test.mjs tests/cache.test.mjs tests/project.test.mjs tests/tools.test.mjs tests/discovery.test.mjs tests/price-history.test.mjs tests/guide.test.mjs tests/product-page.test.mjs tests/shops.test.mjs tests/agent-surface.test.mjs tests/version-sync.test.mjs tests/health.test.mjs tests/landing-github.test.mjs tests/test-manifest.test.mjs tests/store.test.mjs tests/local-server.test.mjs tests/packaging.test.mjs tests/protocol.test.mjs tests/breaker.test.mjs tests/rate-limit.test.mjs",
+    "test": "npm run build && node --test tests/normalize.test.mjs tests/cache.test.mjs tests/project.test.mjs tests/tools.test.mjs tests/discovery.test.mjs tests/price-history.test.mjs tests/guide.test.mjs tests/product-page.test.mjs tests/shops.test.mjs tests/agent-surface.test.mjs tests/version-sync.test.mjs tests/health.test.mjs tests/landing-github.test.mjs tests/test-manifest.test.mjs tests/store.test.mjs tests/local-server.test.mjs tests/packaging.test.mjs tests/protocol.test.mjs tests/breaker.test.mjs tests/rate-limit.test.mjs tests/relay.test.mjs",
     "test:live": "npm run build && node scripts/test-client.mjs",
     "probe": "node scripts/probe-api.mjs",
     "dev": "wrangler dev",

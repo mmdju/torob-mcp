@@ -115,12 +115,26 @@ export const ATTRIBUTION =
 // twenty-seven in October - so the message says that rather than telling the
 // caller to give up, and the gate in http.ts keeps the calls behind the first
 // challenge from hammering while it waits.
+//
+// Measured 2026-10-09: what decides a challenge is where the call comes from, not
+// what it carries. From an ordinary connection every request shape was answered
+// (this server's headers, a full Chrome set, the site's own cookies, and none),
+// and twelve searches 1.5s apart were all answered; from Cloudflare's network
+// three calls in a minute drew the 490, and a Worker's subrequests carry
+// Cloudflare's own `Cf-Worker` header, which cannot be stripped. That is why the
+// message names the egress and points at the two real ways out: run the server
+// yourself, or send it through a relay (TOROB_API_BASE).
 export const CHALLENGED_MSG =
   "Torob answered with a bot challenge (HTTP 490) instead of data, because its edge judged " +
   "this client a bot. This is not a rate limit and an immediate retry will not clear it - " +
   "it clears after a stretch with no calls at all, measured anywhere from a few minutes to " +
   "half an hour. Wait, then retry the same call; or ask the user to search on torob.com and " +
-  "share the product URL.";
+  "share the product URL. What decides it is where the call comes from rather than what it " +
+  "sends: measured 2026-10-09, an ordinary connection answered every request shape and twelve " +
+  "searches 1.5s apart, while a Cloudflare Worker was challenged on its third call of the " +
+  "minute - a Worker's subrequests carry Cloudflare's `Cf-Worker` header, which cannot be " +
+  "removed. To stop seeing this: run this server yourself (npx -y github:mmdju/torob-mcp), or " +
+  "set TOROB_API_BASE to a relay on a connection Torob does not score as a bot.";
 
 // Torob reports a shop score for essentially every offer but almost never
 // reports the vote count behind it (measured: 30 of 30 offers had

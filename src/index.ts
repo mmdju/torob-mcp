@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { MAX_BODY_BYTES, PORT } from "./config.js";
+import { setUpstreamBase, UPSTREAM_BASE_ENV } from "./http.js";
 import { LANDING, MCP_PAGE } from "./landing.js";
 import { buildServer, VERSION } from "./server.js";
 import { installFileStore } from "./store-node.js";
@@ -22,6 +23,10 @@ async function main() {
   // just put up - and rediscovering the wall costs exactly the kind of extra
   // request that extends it. `TOROB_MCP_STORE=off` opts out.
   if (process.env.TOROB_MCP_STORE !== "off") installFileStore();
+  // `TOROB_API_BASE` points upstream calls at a relay of your own. A value that
+  // cannot be used stops the server here, with the reason, rather than letting
+  // every tool answer "could not reach Torob".
+  setUpstreamBase(process.env[UPSTREAM_BASE_ENV]);
 
   if (process.argv.includes("--http")) {
     // Stateless: every POST is self-contained. The SDK requires a fresh

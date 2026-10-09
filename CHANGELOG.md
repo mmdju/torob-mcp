@@ -2,6 +2,23 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
+## 0.5.5 - 2026-10-09
+
+A question turned into a measurement: what is Torob's challenge actually made on? Not the cookies, and not the headers - the connection the call comes from, and nothing a client sends changes that.
+
+### Added
+
+- **`TOROB_API_BASE`** - an optional relay for every upstream call. Torob's edge scores a client by where the call comes from: measured 2026-10-09, an ordinary connection answered five request shapes (this server's headers, a full Chrome header set, the site's own page cookies, and none at all) and twelve searches 1.5s apart, while a Cloudflare Worker drew HTTP 490 with a 274KB arCAPTCHA page on its third call of the minute - and a Worker's subrequests carry Cloudflare's own `Cf-Worker` header, which a header of the same name in the fetch options does not replace. A hosted copy therefore cannot stop being a datacenter client, and the honest cure is a relay on a connection Torob does not score that way. The base is used by every call **and by every `details_url` the server hands out** - a card's details URL is the one path a caller passes straight back, and leaving it on `api.torob.com` would hand the challenge back to the single call the relay was configured for. An absolute https URL is required (a plain-http relay would put every query, price and product id on the wire in the clear) and an unusable value stops the server with the reason rather than quietly falling back to Torob. The local server reads it from the environment, the hosted copy from the Worker's own variables, so a deployment can be pointed at a relay with no code change.
+
+### Changed
+
+- **The challenge message says what was measured, and what to do.** It no longer reads as a generic rate limit: a 490 is the edge scoring the connection, an ordinary connection is not scored that way, a 490 from Cloudflare's network is expected rather than a break, and the two ways out (run the server yourself, or set `TOROB_API_BASE`) are named in the answer the caller sees.
+- **A claim that a Worker's egress is not challenged is gone** from `src/worker.ts`, `README.md`, `README_FA.md`, `SECURITY.md` and `docs/architecture.md`. It was measured as false on 2026-10-09: three calls in a minute from Cloudflare's network drew the 274KB challenge page, and the same calls from the machine beside it went through untouched in the same window. What the docs say now is the measurement, including that the Worker's own `Cf-Worker` header cannot be stripped from inside the Worker.
+
+### Coverage
+
+- `tests/relay.test.mjs`: the default base is Torob's own API, a relay takes every call, a `details_url` handed out earlier follows the relay, a URL on some other host is left alone, the switch is reversible, and a value that cannot be used is refused with the variable's name and does not half-apply.
+
 ## 0.5.4 - 2026-10-09
 
 A pass over the whole server against the live site and API - not against fixtures - found one shape that spent a fifth of every search answer on the same list twice, a link that was an API redirect where a shop's page belonged, three fields Torob already sends that never reached the caller, and one thing the site shows that this server only mentioned: Torob's own product guide.

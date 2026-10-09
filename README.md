@@ -148,6 +148,8 @@ Torob's public web API (**undocumented, may change without notice**). This proje
 
 **Free public service** on Cloudflare Workers, read-only and keyless. This hosted copy answers **at most 20 `/mcp` calls a minute per client IP** - the fifteen tools take fifteen calls, plus the product and shop lookups they lead to, so an ordinary conversation stays inside it while a script cannot use the service as an unmetered price API. Over the limit you get HTTP 429 with a `retry-after` header; **running the server yourself has no limit at all**. Separately, the pacing this server applies is to **Torob**, not to you, because Torob challenges a caller that goes too fast. See [SECURITY.md](SECURITY.md).
 
+One thing to know before hosting your own copy: **what Torob challenges is the connection, not your usage.** Measured 2026-10-09 - from an ordinary connection it answered five request shapes (this server's headers, a full Chrome header set, the site's own cookies, and no cookies at all) and twelve searches 1.5s apart; from Cloudflare's network the same calls drew a 274KB challenge page on the third, and a Worker's subrequests carry Cloudflare's own `Cf-Worker` header, which cannot be stripped. If a hosted copy keeps being challenged, run this server locally or point `TOROB_API_BASE` at a relay you control: every upstream call, and every `details_url` it hands to a caller, goes through that base instead.
+
 ## License
 
 MIT - see [LICENSE](LICENSE). Security notes in [SECURITY.md](SECURITY.md). Persian version in [README_FA.md](README_FA.md).
