@@ -2,6 +2,21 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
+## 0.5.6 - 2026-10-09
+
+The hosted copy is a quick look rather than the thing to depend on, and it now says so exactly where a caller stops: in the message that stops them.
+
+### Changed
+
+- **Every stop on the hosted copy names it as the quick-test copy and points at the main version.** Both the 429 (this service's own twenty-a-minute limit, which answers with `retry-after`) and the wall message (`retry in about N minute(s)`) now end with a note: this is the hosted quick-test copy, rate limited and paused by Torob from time to time because a Cloudflare Worker is a datacenter client; for unrestricted use, run `npx -y github:mmdju/torob-mcp`, with the source link. A visitor who hits the wall on the public URL no longer has to guess whether the tools are broken - they are not.
+- **The note is appended by the Worker entry point alone** (`setHostedDemo` in `src/http.ts`, called by `src/worker.ts`). A local run is the unrestricted version and never claims a limit it does not have, in either message.
+- **README and README_FA lead with the two versions** instead of calling the hosted one "the free public service": the main version is the one on your machine, and the hosted copy is a demo, with the measurement behind that next to it.
+- **The landing page's note line says the same**, in Persian and English, so a visitor knows what the hosted URL is before connecting a client.
+
+### Coverage
+
+- `tests/breaker.test.mjs`: the hosted copy's challenge message and the cooldown message behind it both carry the note and the source link, and a local run carries neither.
+
 ## 0.5.5 - 2026-10-09
 
 A question turned into a measurement: what is Torob's challenge actually made on? Not the cookies, and not the headers - the connection the call comes from, and nothing a client sends changes that.

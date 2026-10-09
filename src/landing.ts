@@ -531,8 +531,8 @@
     "Just ask: «a phone under 200 million?»",
     "Read-only — no key, no login."
   ];
-  var HEALTH_OK_EN = "Service is live", STATS_EN = "15 tools · prices in Toman", NOTE_EN = "Independent project — not affiliated with Torob", SHARE_EN = "Share", SHARED_EN = "Link copied", GH_EN = "GitHub", VER_EN = " · v", QR_EN = "QR", QRH_EN = "Scan with your phone", QRCOPY_EN = "Copy link", QRCLOSE_EN = "Close";
-  var HEALTH_OK_FA = "سرویس زنده است", STATS_FA = "۱۵ ابزار · قیمت به تومان", NOTE_FA = "پروژه‌ای مستقل — وابسته به ترب نیست", SHARE_FA = "اشتراک", SHARED_FA = "پیوند کپی شد", GH_FA = "گیت‌هاب", VER_FA = " · نسخه ", QR_FA = "کیوآر", QRH_FA = "اسکن با گوشی", QRCOPY_FA = "کپی پیوند", QRCLOSE_FA = "بستن";
+  var HEALTH_OK_EN = "Service is live", STATS_EN = "15 tools · prices in Toman", NOTE_EN = "Independent project — not affiliated with Torob · quick-test copy: rate limited, and paused from time to time — run it yourself for the unrestricted version", SHARE_EN = "Share", SHARED_EN = "Link copied", GH_EN = "GitHub", VER_EN = " · v", QR_EN = "QR", QRH_EN = "Scan with your phone", QRCOPY_EN = "Copy link", QRCLOSE_EN = "Close";
+  var HEALTH_OK_FA = "سرویس زنده است", STATS_FA = "۱۵ ابزار · قیمت به تومان", NOTE_FA = "پروژه‌ای مستقل — وابسته به ترب نیست · نسخهٔ تستی سریع: محدودیت داره و هر چند وقت متوقف می‌شه — برای نسخهٔ بدون محدودیت خودت اجراش کن", SHARE_FA = "اشتراک", SHARED_FA = "پیوند کپی شد", GH_FA = "گیت‌هاب", VER_FA = " · نسخه ", QR_FA = "کیوآر", QRH_FA = "اسکن با گوشی", QRCOPY_FA = "کپی پیوند", QRCLOSE_FA = "بستن";
   var STATH_EN = "Project stats", STATH_FA = "آمار پروژه", STST_EN = "Stars", STST_FA = "استار", STFK_EN = "Forks", STFK_FA = "فورک", STTL_EN = "Tools", STTL_FA = "ابزار", STVR_EN = "Version", STVR_FA = "نسخه";
   var isEn = false;
   document.getElementById("langB").addEventListener("click", function () {

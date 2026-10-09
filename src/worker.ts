@@ -14,8 +14,9 @@
 // spending requests, and can be pointed at a relay the operator controls with
 // the TOROB_API_BASE variable below.
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { DEMO_NOTE } from "./config.js";
 import { FONT_BIN } from "./fonts.js";
-import { setUpstreamBase } from "./http.js";
+import { setHostedDemo, setUpstreamBase } from "./http.js";
 import { LANDING, MCP_PAGE } from "./landing.js";
 import { OG_IMAGE } from "./og-image.js";
 import {
@@ -72,7 +73,7 @@ function tooManyRequests(verdict: RateLimitVerdict): Response {
           message:
             `Too many requests: this service answers at most ${verdict.limit} /mcp calls a minute per client, ` +
             `and the window resets in ${verdict.retry_after_seconds} second(s). The limit belongs to this hosted ` +
-            `copy - a self-hosted run has none.`,
+            `quick-test copy - a self-hosted run has none.${DEMO_NOTE}`
         },
       }),
       {
@@ -135,6 +136,9 @@ export class RateLimiter {
 export default {
   async fetch(req: Request, env?: WorkerEnv, ctx?: WorkerContext): Promise<Response> {
     const url = new URL(req.url);
+    // This copy is the quick-test one: every message it can stop a caller on
+    // says so and points at the version without a limit.
+    setHostedDemo(true);
     try {
       setUpstreamBase(env?.TOROB_API_BASE);
     } catch (err) {

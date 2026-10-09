@@ -9,7 +9,7 @@
 // the other test files too.
 import { test, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { breakerRemainingMs, expireWallForTests, forgetLocalWallForTests, resetBreakerForTests, setPaceForTests, setRetryDelayForTests } from "../dist/http.js";
+import { breakerRemainingMs, expireWallForTests, forgetLocalWallForTests, resetBreakerForTests, setHostedDemo, setPaceForTests, setRetryDelayForTests } from "../dist/http.js";
 import { installFileStore, uninstallFileStore } from "../dist/store-node.js";
 import { setStoreBackend } from "../dist/store.js";
 import { TOOLS } from "../dist/tools.js";
@@ -51,6 +51,8 @@ after(() => {
 // which is exactly the behaviour being tested.
 beforeEach(async () => {
   await resetBreakerForTests();
+  // The hosted-copy note is module state; every test starts as a local run.
+  setHostedDemo(false);
   calls = 0;
   mode = "challenge";
 });
@@ -79,6 +81,35 @@ test("the breaker stops the rest of a burst from calling upstream at all", async
 test("the cooldown message says when to come back, not just that it failed", async () => {
   await assert.rejects(() => run("search_products", { query: "x" }));
   await assert.rejects(() => run("search_products", { query: "x" }), /retry in about \d+ minute/);
+});
+
+// The hosted copy is a quick look, and the two messages a caller can stop at
+// have to say so: a visitor who sees a wall on the public URL otherwise reads
+// it as the tools being broken. Both messages carry it, and a local run - which
+// is the version without a limit - never does.
+test("the hosted copy names itself and where the unrestricted version is", async () => {
+  setHostedDemo(true);
+  await assert.rejects(() => run("search_products", { query: "کلید-میزبانی-یک" }), (err) => {
+    assert.match(err.message, /quick-test copy/);
+    assert.match(err.message, /github\.com\/mmdju\/torob-mcp/);
+    return true;
+  });
+  // And the cooldown message behind it, which is what a busy caller sees next.
+  await assert.rejects(() => run("search_products", { query: "کلید-میزبانی-دو" }), (err) => {
+    assert.match(err.message, /challenged this server recently/);
+    assert.match(err.message, /quick-test copy/);
+    return true;
+  });
+  setHostedDemo(false);
+});
+
+test("a local run does not advertise a limit it does not have", async () => {
+  await assert.rejects(() => run("search_products", { query: "کلید-محلی-یک" }), (err) => {
+    assert.match(err.message, /bot challenge/);
+    assert.doesNotMatch(err.message, /quick-test copy/);
+    assert.doesNotMatch(err.message, /github\.com\/mmdju\/torob-mcp/);
+    return true;
+  });
 });
 
 test("the breaker expires, so a later call gets a clean chance", async () => {

@@ -16,6 +16,7 @@
 
 import {
   CHALLENGED_MSG,
+  DEMO_NOTE,
   FETCH_TIMEOUT_MS,
   MAX_RETRIES,
   MIN_GAP_MS,
@@ -278,11 +279,21 @@ async function wallRemainingMs(): Promise<number> {
   return Math.max(0, wall.until - now);
 }
 
+// Set by the Worker entry point alone. The hosted copy is a quick-test one, and
+// the two messages a caller can stop at say so and name where the unlimited
+// version is; a local run is that version, so it never sets this.
+let hostedDemo = false;
+export function setHostedDemo(value: boolean): void {
+  hostedDemo = value;
+}
+const demoNote = () => (hostedDemo ? DEMO_NOTE : "");
+
 function wallClosed(waiting: number): UpstreamError {
   return new UpstreamError(
     `Torob challenged this server recently, so no call was made. It clears on its own - retry in ` +
       `about ${Math.ceil(waiting / 60_000)} minute(s). Nothing was searched, so no result below is ` +
-      `missing because of this.`,
+      `missing because of this.` +
+      demoNote(),
     "challenged"
   );
 }
@@ -348,7 +359,7 @@ export async function torobGet<T = unknown>(path: string, opts?: { retries?: num
         // behind it in a burst fail without spending an upstream request.
         if (looksLikeChallenge(res, body)) {
           await openWall();
-          throw new UpstreamError(CHALLENGED_MSG, "challenged", { status: res.status });
+          throw new UpstreamError(CHALLENGED_MSG + demoNote(), "challenged", { status: res.status });
         }
 
         // An answer that is not a challenge is the edge letting us through, so

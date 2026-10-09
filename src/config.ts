@@ -136,6 +136,18 @@ export const CHALLENGED_MSG =
   "removed. To stop seeing this: run this server yourself (npx -y github:mmdju/torob-mcp), or " +
   "set TOROB_API_BASE to a relay on a connection Torob does not score as a bot.";
 
+// The hosted Worker is a quick look, not something to depend on: it is rate
+// limited, and Torob scores a datacenter client - which is what a Worker is -
+// as a bot far sooner than an ordinary connection (measured 2026-10-09: three
+// calls in a minute there, twelve at the same pace from a home connection).
+// Both places a caller can stop - this service's own 429 and Torob's wall -
+// therefore say so and name the version without either, so a visitor is never
+// left thinking the tools are broken. Only the Worker appends it.
+export const DEMO_NOTE =
+  " Note: this is the hosted quick-test copy - rate limited, and paused by Torob from time to time, " +
+  "because a Cloudflare Worker is a datacenter client. For unrestricted use, run the main version " +
+  "yourself: npx -y github:mmdju/torob-mcp (source: https://github.com/mmdju/torob-mcp).";
+
 // Torob reports a shop score for essentially every offer but almost never
 // reports the vote count behind it (measured: 30 of 30 offers had
 // shop_score 5 and shop_votes_count 0 on a live product). A vote floor would
