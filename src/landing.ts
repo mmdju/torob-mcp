@@ -262,7 +262,7 @@
       <a class="stat" href="/health"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg><span class="v" id="stVersion">…</span><span class="k" id="stVersK">نسخه</span></a>
     </div>
   </section>
-  <p class="note"><span id="noteT">پروژه‌ای مستقل — وابسته به ترب نیست</span> · <a id="bugL" href="https://github.com/mmdju/torob-mcp/issues/new" target="_blank" rel="noopener">گزارش باگ</a></p>
+  <p class="note"><span id="noteT">پروژه‌ای مستقل — وابسته به ترب نیست · نسخهٔ تستی سریع: محدودیت داره و هر چند وقت متوقف می‌شه</span> · <a id="mainL" href="https://github.com/mmdju/torob-mcp" target="_blank" rel="noopener">نسخهٔ اصلی (بدون محدودیت)</a> · <a id="bugL" href="https://github.com/mmdju/torob-mcp/issues/new" target="_blank" rel="noopener">گزارش باگ</a></p>
 </main>
 <div class="qr-ov" id="qrOv">
   <div class="qr-card" role="dialog" aria-modal="true" aria-labelledby="qrH">
@@ -531,8 +531,8 @@
     "Just ask: «a phone under 200 million?»",
     "Read-only — no key, no login."
   ];
-  var HEALTH_OK_EN = "Service is live", STATS_EN = "15 tools · prices in Toman", NOTE_EN = "Independent project — not affiliated with Torob · quick-test copy: rate limited, and paused from time to time — run it yourself for the unrestricted version", SHARE_EN = "Share", SHARED_EN = "Link copied", GH_EN = "GitHub", VER_EN = " · v", QR_EN = "QR", QRH_EN = "Scan with your phone", QRCOPY_EN = "Copy link", QRCLOSE_EN = "Close";
-  var HEALTH_OK_FA = "سرویس زنده است", STATS_FA = "۱۵ ابزار · قیمت به تومان", NOTE_FA = "پروژه‌ای مستقل — وابسته به ترب نیست · نسخهٔ تستی سریع: محدودیت داره و هر چند وقت متوقف می‌شه — برای نسخهٔ بدون محدودیت خودت اجراش کن", SHARE_FA = "اشتراک", SHARED_FA = "پیوند کپی شد", GH_FA = "گیت‌هاب", VER_FA = " · نسخه ", QR_FA = "کیوآر", QRH_FA = "اسکن با گوشی", QRCOPY_FA = "کپی پیوند", QRCLOSE_FA = "بستن";
+  var HEALTH_OK_EN = "Service is live", STATS_EN = "15 tools · prices in Toman", NOTE_EN = "Independent project — not affiliated with Torob · quick-test copy: rate limited, and paused from time to time", SHARE_EN = "Share", SHARED_EN = "Link copied", GH_EN = "GitHub", VER_EN = " · v", QR_EN = "QR", QRH_EN = "Scan with your phone", QRCOPY_EN = "Copy link", QRCLOSE_EN = "Close";
+  var HEALTH_OK_FA = "سرویس زنده است", STATS_FA = "۱۵ ابزار · قیمت به تومان", NOTE_FA = "پروژه‌ای مستقل — وابسته به ترب نیست · نسخهٔ تستی سریع: محدودیت داره و هر چند وقت متوقف می‌شه", SHARE_FA = "اشتراک", SHARED_FA = "پیوند کپی شد", GH_FA = "گیت‌هاب", VER_FA = " · نسخه ", QR_FA = "کیوآر", QRH_FA = "اسکن با گوشی", QRCOPY_FA = "کپی پیوند", QRCLOSE_FA = "بستن";
   var STATH_EN = "Project stats", STATH_FA = "آمار پروژه", STST_EN = "Stars", STST_FA = "استار", STFK_EN = "Forks", STFK_FA = "فورک", STTL_EN = "Tools", STTL_FA = "ابزار", STVR_EN = "Version", STVR_FA = "نسخه";
   var isEn = false;
   document.getElementById("langB").addEventListener("click", function () {
