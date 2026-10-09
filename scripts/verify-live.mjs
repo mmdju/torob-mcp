@@ -20,16 +20,30 @@ const bad = (label, extra = "") => {
   console.log(`  FAIL ${label}${extra ? ` - ${extra}` : ""}`);
 };
 
+// A 429 here is this service's own limit, not a wrong answer: the hosted copy
+// answers at most 20 /mcp calls a minute per client, and the caller's address
+// is shared (a GitHub runner's egress is, measured: three scheduled runs died
+// on `Error: HTTP 429` at the MCP handshake before this), so the budget can be
+// spent by a neighbour's traffic. The window the response names is waited out
+// instead, and only a limit that outlasts the wait fails the run.
 async function rpc(method, params, id) {
-  const headers = { "content-type": "application/json", accept: "application/json, text/event-stream" };
-  if (sessionId) headers["mcp-session-id"] = sessionId;
-  const res = await fetch(MCP, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) });
-  const sid = res.headers.get("mcp-session-id");
-  if (sid) sessionId = sid;
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const text = await res.text();
-  const line = text.split("\n").find((l) => l.startsWith("data:"));
-  return JSON.parse(line ? line.slice(5).trim() : text);
+  for (let attempt = 1; ; attempt++) {
+    const headers = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+    if (sessionId) headers["mcp-session-id"] = sessionId;
+    const res = await fetch(MCP, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) });
+    const sid = res.headers.get("mcp-session-id");
+    if (sid) sessionId = sid;
+    if (res.status === 429 && attempt <= 3) {
+      const waitSeconds = Math.min(75, Math.max(1, Number(res.headers.get("retry-after")) || 20));
+      console.log(`  ..  rate limited, waiting ${waitSeconds}s (attempt ${attempt} of 3)`);
+      await new Promise((r) => setTimeout(r, waitSeconds * 1000));
+      continue;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    const line = text.split("\n").find((l) => l.startsWith("data:"));
+    return JSON.parse(line ? line.slice(5).trim() : text);
+  }
 }
 
 async function call(name, args, id) {
