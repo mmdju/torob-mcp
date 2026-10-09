@@ -13,6 +13,10 @@ The hosted copy is a quick look rather than the thing to depend on, and it now s
 - **README and README_FA lead with the two versions** instead of calling the hosted one "the free public service": the main version is the one on your machine, and the hosted copy is a demo, with the measurement behind that next to it.
 - **The landing page's note line says the same**, in Persian and English, so a visitor knows what the hosted URL is before connecting a client.
 
+### Fixed
+
+- **The landing page's stats card still counted fourteen tools.** The number in the card was hard-coded, so the `product_guide` tool added in 0.5.4 was missing from the page while every other count in the repository said fifteen. Found by looking at the deployed page instead of at the source: the card renders `data-count="14">14` while `STATS_EN`/`STATS_FA` a few lines below already said fifteen.
+
 ### Coverage
 
 - `tests/breaker.test.mjs`: the hosted copy's challenge message and the cooldown message behind it both carry the note and the source link, and a local run carries neither.
