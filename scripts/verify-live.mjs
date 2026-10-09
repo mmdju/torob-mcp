@@ -154,9 +154,10 @@ try {
   groups ? ok("search filters", `${groups} groups: ${search.available_filters.slice(0, 4).map((f) => f.slug).join(", ")}`) : bad("search filters", "none reported");
   // The groups carry the values they take, and Torob's count travels with its
   // own caveat instead of being quoted as a fact.
-  const withOptions = (search.available_filters ?? []).find((f) => Array.isArray(f.options) && f.options.length);
+  const groupsWithValues = (search.available_filters ?? []).filter((f) => Array.isArray(f.options) && f.options.length);
+  const withOptions = groupsWithValues[0];
   withOptions
-    ? ok("filter values", `${withOptions.slug}: ${withOptions.options.length} option(s)`)
+    ? ok("filter values", `${groupsWithValues.length} group(s) carry values, e.g. ${withOptions.slug}: ${withOptions.options.length} option(s)`)
     : bad("filter values", "no group carries its values");
   search.total_matches_note ? ok("count is labelled approximate") : bad("count note", "total_matches_note missing");
   // The cheapest and dearest price Torob saw for this query ride along.
@@ -164,14 +165,47 @@ try {
   await pause();
 
   // A value the search itself advertised must round-trip through `filters`.
-  if (withOptions) {
-    const slug = withOptions.slug;
-    const value = withOptions.options[0].value;
+  // The brand group is the one exception, and deliberately so: a brand travels
+  // in upstream's own `brand` parameter (Torob filters on its id and ignores the
+  // slug), so `filters_applied` never names it - see tests/discovery.test.mjs.
+  // This check used to take whichever group came first with values, which on a
+  // phone search is brand, and so failed on every run that got this far.
+  const roundTrip = groupsWithValues.find((f) => f.slug !== "brand");
+  if (roundTrip) {
+    const slug = roundTrip.slug;
+    const value = roundTrip.options[0].value;
     const filtered = await call("search_products", { query: "گوشی ایفون ۱۳", filters: { [slug]: value }, limit: 3, sort: "expensive" }, id++);
     filtered.filters_applied?.[slug] === value
       ? ok("filter round-trip", `${slug}=${value}`)
       : bad("filter round-trip", `${slug}=${value} came back as ${JSON.stringify(filtered.filters_applied)}`);
     filtered.sort_meaning ? ok("sort meaning", filtered.sort_meaning) : bad("sort meaning", "sort_meaning missing");
+    await pause();
+  }
+
+  // The brand path has its own contract, and it is two-sided: the group's value
+  // (the brand id) narrows the search, and a wording that matches no brand this
+  // search offers is refused with the ones it does have - because Torob ignores
+  // an unknown brand, which would come back as an unfiltered list wearing a
+  // filtered answer.
+  const brandValue = (search.available_filters ?? []).find((f) => f.slug === "brand")?.options?.[0]?.value;
+  if (brandValue) {
+    const byBrand = await call("search_products", { query: "گوشی ایفون ۱۳", brand: brandValue, limit: 3 }, id++);
+    byBrand.total_matches <= search.total_matches
+      ? ok("brand path", `brand=${brandValue} narrowed ${search.total_matches} matches to ${byBrand.total_matches}`)
+      : bad("brand path", `brand=${brandValue} returned MORE matches than the unfiltered search (${byBrand.total_matches} vs ${search.total_matches})`);
+    await pause();
+    let refusal = null;
+    try {
+      await call("search_products", { query: "گوشی ایفون ۱۳", brand: "برند-ناموجود-۴۰۴" }, id++);
+    } catch (err) {
+      refusal = String(err.message);
+    }
+    refusal && /is not a brand this search offers/.test(refusal)
+      ? ok("brand refusal", "a wording no brand matches is refused instead of being sent and ignored")
+      : bad(
+          "brand refusal",
+          refusal ? `refused with unexpected wording: ${refusal.slice(0, 140)}` : "an unknown brand was accepted instead of refused"
+        );
     await pause();
   }
 
@@ -193,7 +227,10 @@ try {
     // The spec tables ride along in the same response. The cheapest card of a
     // broad search can be a bare accessory with none, so the check walks the
     // cards this run already holds until one carries a spec table.
-    let specRows = Array.isArray(details.specs) ? details.specs : null;
+    // An empty table is not a table: `[]` is truthy, so this check used to pass
+    // on a card whose specs had arrived empty - the same shape change it exists
+    // to catch, wearing the costume of a pass.
+    let specRows = Array.isArray(details.specs) && details.specs.length ? details.specs : null;
     for (const card of search.products.slice(1, 3)) {
       if (specRows) break;
       const extra = await call("product_details", { prk: card.prk, details_url: card.details_url, max_offers: 1 }, id++);
