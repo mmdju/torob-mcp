@@ -88,7 +88,9 @@ Or `npx -y github:mmdju/torob-mcp`, which builds through the `prepare` script on
 
 `node scripts/verify-live.mjs` (needs Node.js 18+, nothing to install).
 
-It drives the real endpoint the way an MCP client does. It paces its calls - Torob challenges a burst, so a check that hammers every tool in a second is testing the wrong thing - and reports a challenge as the finding it is **without failing the run**: the wall is upstream's answer to a fast caller, not a broken deployment. Pass a gap in seconds to slow it further: `node scripts/verify-live.mjs 5`, or `node scripts/verify-live.mjs <url> 5` to point it elsewhere.
+It drives the real endpoint the way an MCP client does, and calls every tool in the list. It paces its calls - Torob challenges a burst, so a check that hammers every tool in a second is testing the wrong thing - and reports a challenge as the finding it is **without failing the run**: the wall is upstream's answer to a fast caller, not a broken deployment. Pass a gap in seconds to slow it further: `node scripts/verify-live.mjs 5`, or `node scripts/verify-live.mjs <url> 5` to point it elsewhere.
+
+The hosted copy has its own limit - twenty `/mcp` calls a minute per client - and that budget belongs to the address, which a scheduled runner shares with other jobs. A 429 is therefore waited out (the window the response names, three attempts) instead of being read as a broken endpoint; only a limit that outlasts the wait fails the run.
 
 A red badge on the [Test workflow](../.github/workflows/test.yml) means the code failed its own suite. The scheduled [Live verify](../.github/workflows/verify.yml) badge means the endpoint stopped answering its contract - health, version, landing, handshake, tool list - **or** that Torob renamed something a live check reads, since those checks fail the run too. A challenge is the one live failure that never reddens it.
 

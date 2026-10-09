@@ -205,6 +205,41 @@ try {
       : bad("spec tables", "no spec table on any of the first three cards - the shape may have changed");
     await pause();
 
+    // Torob's own guide, read as text. Not every product has one, so the sweep
+    // walks the cards it already holds until one does; a phone search with no
+    // guide anywhere in the first three is the shape change, not an empty
+    // article. What comes back must be the article's content: markup reaching a
+    // caller is the failure this tool exists to prevent.
+    let guide = null;
+    for (const card of search.products.slice(0, 3)) {
+      const attempt = await call("product_guide", { prk: card.prk, details_url: card.details_url }, id++);
+      if (Array.isArray(attempt.sections) && attempt.sections.length) {
+        guide = attempt;
+        break;
+      }
+      await pause();
+    }
+    if (guide) {
+      const headings = guide.sections.filter((s) => typeof s.heading === "string" && s.heading).length;
+      guide.text_length > 0
+        ? ok("product_guide", `${guide.sections.length} section(s), ${headings} named by Torob, ${guide.text_length} character(s)`)
+        : bad("product_guide", "sections with no text in them");
+      headings ? ok("guide headings", "Torob's own section names travel with the text") : bad("guide headings", "no section carries a heading");
+      // The one shape this tool must never hand out: the HTML it was built from.
+      /<[a-z][^>]*>/i.test(JSON.stringify(guide.sections)) || /&#?[a-z0-9]+;/i.test(JSON.stringify(guide.sections))
+        ? bad("guide is text", "markup or an undecoded entity reached the caller")
+        : ok("guide is text", "no markup in the answer");
+      guide.truncated && !guide.note
+        ? bad("guide truncation", "truncated without a note saying so")
+        : ok("guide cap", guide.truncated ? `truncated at max_chars, ${guide.text_length} characters available` : "fits the default cap");
+      guide.guide_url === `https://torob.com/p/${guide.prk}/`
+        ? ok("guide url", guide.guide_url)
+        : bad("guide url", String(guide.guide_url ?? "missing"));
+    } else {
+      bad("product_guide", "no guide on any of the first three cards of a phone search - the endpoint or the shape may have changed");
+    }
+    await pause();
+
     // The chart is Torob's own: monthly points plus the shop-level changes.
     // The first card of a phone search is normally charted; when it is not, the
     // next card is tried before the shape is called broken. An empty chart and
