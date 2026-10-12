@@ -66,14 +66,42 @@ test("OPTIONS answers the CORS preflight", async () => {
   assert.equal(res.headers.get("access-control-allow-origin"), "*");
 });
 
-test("GET /mcp serves the human connect page, not a JSON error", async () => {
-  const res = await worker.fetch(new Request("https://torob-mcp.test/mcp"));
+// The transport rule: GET on the MCP endpoint streams `text/event-stream` or
+// answers 405 - nothing else. Answering 200 + HTML did not read as an error to
+// a client, it read as a stream that opened and immediately ended, and the
+// official TypeScript SDK reconnects to that forever with its attempt counter
+// pinned at 0: 232,748 requests on 2026-10-08 and 233,327 on 2026-10-10, past
+// this plan's 100,000/day. The 405 is the fix, so the 405 is the test.
+test("GET /mcp refuses a stream request the way the transport spec asks", async () => {
+  const stream = await worker.fetch(
+    new Request("https://torob-mcp.test/mcp", { headers: { accept: "text/event-stream" } })
+  );
+  assert.equal(stream.status, 405, "an SSE client must be turned away, not fed HTML");
+  assert.equal(stream.headers.get("allow"), "POST");
+  assert.equal(stream.headers.get("cache-control"), "no-store");
+  assert.equal(stream.headers.get("access-control-allow-origin"), "*");
+
+  // No Accept header at all: curl, a bot, and the polling clients that send */*.
+  const bare = await worker.fetch(new Request("https://torob-mcp.test/mcp"));
+  assert.equal(bare.status, 405, "a client that never asked for HTML must not get HTML");
+});
+
+test("GET /mcp still serves the human connect page to a browser", async () => {
+  const res = await worker.fetch(
+    new Request("https://torob-mcp.test/mcp", { headers: { accept: "text/html,application/xhtml+xml" } })
+  );
   assert.equal(res.status, 200);
   assert.match(res.headers.get("content-type") ?? "", /text\/html/);
+  assert.match(res.headers.get("cache-control") || "", /public, max-age=\d+/, "the page must stay cacheable");
+  assert.equal(res.headers.get("access-control-allow-origin"), "*");
   const html = await res.text();
   // The address to paste, with the scheme, is what a visitor came here for.
   assert.match(html, /https:\/\/torob-mcp\.mmdju3\.workers\.dev\/mcp/);
   assert.match(html, /کپی/);
+  // The four Doran weights are served from /doran-*.woff2, not carried twice.
+  assert.ok(html.length < 60_000, `GET /mcp is ${html.length} bytes - the fonts belong at /doran-*.woff2`);
+  assert.ok(!html.includes("base64,d09GMg"), "the page must link the fonts, not embed them");
+  assert.match(html, /\/doran-\d{3}\.woff2/);
 });
 
 test("the landing page is Persian and RTL", async () => {

@@ -71,8 +71,21 @@ test("POST /mcp is the only path the limit touches", async () => {
   assert.equal(health.status, 200);
   const landing = await worker.fetch(new Request("https://torob-mcp.test/", { headers: { "cf-connecting-ip": "9.9.9.9" } }));
   assert.equal(landing.status, 200);
-  const page = await worker.fetch(new Request("https://torob-mcp.test/mcp", { headers: { "cf-connecting-ip": "9.9.9.9" } }));
+  const page = await worker.fetch(
+    new Request("https://torob-mcp.test/mcp", {
+      headers: { "cf-connecting-ip": "9.9.9.9", accept: "text/html,application/xhtml+xml" },
+    })
+  );
   assert.equal(page.status, 200);
+  // The 405 an SSE client gets instead is outside the budget too - GET never
+  // spends a slot, whatever the answer is.
+  const refused = await worker.fetch(
+    new Request("https://torob-mcp.test/mcp", {
+      headers: { "cf-connecting-ip": "9.9.9.9", accept: "text/event-stream" },
+    })
+  );
+  assert.equal(refused.status, 405);
+  assert.equal(refused.headers.get("x-ratelimit-limit"), null);
 
   // A different client is unaffected by that.
   assert.notEqual((await post("8.8.8.8")).status, 429);

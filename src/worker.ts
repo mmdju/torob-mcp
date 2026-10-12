@@ -184,9 +184,42 @@ export default {
       }
     }
     if (req.method === "GET" && url.pathname === "/mcp") {
-      // Same page, same CORS as the POST route: a browser client that probes
-      // the endpoint with GET has to be able to read the answer.
-      return withCors(new Response(MCP_PAGE, { headers: { "content-type": "text/html; charset=utf-8" } }));
+      // The transport rule: GET on the MCP endpoint either streams
+      // `text/event-stream` or answers 405 - anything else is wrong
+      // (modelcontextprotocol.io, "Listening for Messages from the Server").
+      //
+      // This used to be 200 + HTML, which a client does not read as an error -
+      // it reads it as a stream that opened and immediately ended. The official
+      // TypeScript SDK takes 200 as success, hands the HTML to an SSE parser
+      // that discards every line, watches the reader finish, and schedules a
+      // reconnect with its attempt counter hard-coded to 0 - so `maxRetries: 2`
+      // never applies. One GET a second per client session, for as long as the
+      // process lives: 232,748 requests on 2026-10-08 and 233,327 on 2026-10-10,
+      // all of this plan's 100,000/day. Caching never could have helped - there
+      // is no edge cache in front of workers.dev, and a cache hit would have
+      // been billed anyway. Every known client stops cleanly on 405; the SDK
+      // handles it with `return` and the comment "This is an expected case
+      // that should not trigger an error".
+      //
+      // A browser is the one client that asks for text/html, and it still gets
+      // the page.
+      const accept = (req.headers.get("accept") || "").toLowerCase();
+      if (accept.includes("text/html") && !accept.includes("text/event-stream")) {
+        return withCors(new Response(MCP_PAGE, {
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            "cache-control": "public, max-age=300",
+          },
+        }));
+      }
+      return withCors(new Response("Method Not Allowed: this server is stateless, POST to /mcp.", {
+        status: 405,
+        headers: {
+          allow: "POST",
+          "content-type": "text/plain; charset=utf-8",
+          "cache-control": "no-store",
+        },
+      }));
     }
     if (req.method === "GET" && url.pathname === "/health") {
       // The version is part of health on purpose: the docs advertise the

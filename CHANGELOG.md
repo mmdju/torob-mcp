@@ -2,6 +2,18 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
+## 0.5.7 - 2026-10-12
+
+The hosted copy was burning its Cloudflare plan every day, and none of it was tool calls.
+
+### Fixed
+
+- **`GET /mcp` stops feeding the daily budget.** That one path ran 232,748 requests on 2026-10-08 and 233,327 on 2026-10-10, against a free plan of 100,000 - so every worker on the account answered "error code: 1027". It was not crawlers. The Streamable HTTP transport says a server answers GET with `text/event-stream` or else 405, and answering 200 with HTML does not read as an error to a client: it reads as a stream that opened and immediately ended. The official TypeScript SDK then hands the HTML to an SSE parser that discards every line, and reschedules a reconnect with its attempt counter hard-coded to 0 - so `maxRetries: 2` never applies. One GET a second, for the life of the process; two or three open sessions account for the whole total. The same burn hit digikala-mcp in October with the same root cause; this is that fix, ported.
+- **`GET /mcp` now answers 405** unless the client asked for `text/html`, which every known client treats as the expected answer (typescript-sdk: `return`, "This is an expected case that should not trigger an error"). The connect page still ships to a browser, with CORS and a cacheable header it did not have before. The Node transport (`--http`) answers the same way it did, by the same rule.
+- **The connect page stopped inlining its four Doran weights as base64.** The Worker already served them from `/doran-*.woff2`, so the same bytes travelled twice: **283 KB -> 29 KB**. The generator source is `landing/torob-mcp-page.html`; `node scripts/gen-landing.mjs` rebuilds `src/landing.ts`.
+- A cache header was never going to fix this. `*.workers.dev` has no zone, so there is no edge cache in front of the Worker, the Cache API runs inside it after the invocation is already counted, and even Workers Cache bills a hit as a standard request. Only Workers Static Assets are free, and a page this Worker builds is not one.
+- Tests: the 405 for an SSE client and for a client with no Accept header, the connect page still reaching a browser under 60 KB with no embedded font, and the version the three places agree on.
+
 ## 0.5.6 - 2026-10-09
 
 The hosted copy is a quick look rather than the thing to depend on, and it now says so exactly where a caller stops: in the message that stops them.

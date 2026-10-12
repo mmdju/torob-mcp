@@ -81,10 +81,22 @@ async function main() {
             try { await reqServer.close(); } catch { /* ignore */ }
           }
         });
-      } else if (req.method === "GET" && path === "/mcp") {
-        // Same page the Worker serves: a browser client that GETs the endpoint
-        // gets an explanation, not a 404.
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(MCP_PAGE);
+      } else if (req.method === "GET" && (path === "/mcp" || (path || "").startsWith("/mcp?"))) {
+        // Same rule as worker.ts: the transport is GET-stream-or-405, and a
+        // browser is the only client that asks for text/html. Answering 200
+        // with HTML here is what made the hosted worker burn its quota - the
+        // SDK reads it as a stream that opened and ended, and reschedules a
+        // reconnect forever.
+        const accept = String(req.headers.accept || "").toLowerCase();
+        if (accept.includes("text/html") && !accept.includes("text/event-stream")) {
+          res
+            .writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300" })
+            .end(MCP_PAGE);
+        } else {
+          res
+            .writeHead(405, { "allow": "POST", "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" })
+            .end("Method Not Allowed: this server is stateless, POST to /mcp.");
+        }
       } else if (req.method === "GET" && path === "/health") {
         res
           .writeHead(200, { "content-type": "application/json" })
