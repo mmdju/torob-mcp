@@ -538,6 +538,37 @@ test("an id-only answer for another product is never remembered as this one", as
   assert.equal(out.name_fa, "گوشی ایفون ۱۳", "the mismatched answer from the probe must not come back from cache");
 });
 
+test("a details_url that opens another product is answered, and never filed under this id", async () => {
+  // The details_url path is the other caller that can be handed a different
+  // product: the caller echoes a URL back, and the id inside it is only
+  // compared when the URL carries one. Here it does not - so the only thing
+  // that can catch the mismatch is the payload itself, the same rule the
+  // id-only probe above already follows.
+  const wanted = "prk-wanted-1111";
+  let wrong = true;
+  stub((url) => {
+    if (url.includes("/details/")) {
+      return wrong
+        ? { ...detailsPayload, random_key: "prk-other-2222", name1: "محصول دیگری" }
+        : { ...detailsPayload, random_key: wanted, name1: "گوشی ایفون ۱۳" };
+    }
+    return { results: [], count: 0, next: "" };
+  });
+  // No prk in the URL, so there is nothing to compare against before opening it.
+  const detailsUrl = "https://api.torob.com/v4/base-product/details/?search_id=s9";
+
+  const first = await run("product_details", { prk: wanted, details_url: detailsUrl });
+  assert.equal(first.name_fa, "محصول دیگری", "the page that was really opened is the answer to this call");
+
+  wrong = false;
+  const second = await run("product_details", { prk: wanted, details_url: detailsUrl });
+  assert.equal(
+    second.name_fa,
+    "گوشی ایفون ۱۳",
+    "the mismatched payload must not have been filed under the id it disagreed with"
+  );
+});
+
 test("search_products stops at one page of cards and admits the page held more", async () => {
   // Upstream sends 24-26 cards whatever size is asked for, so 100 used to
   // promise more than a page can deliver - and the tool must say it was short

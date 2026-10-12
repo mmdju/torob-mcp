@@ -3,12 +3,13 @@ main = "dist/worker.js"
 account_id = "e6ad0b81fd6142add1302be356dad360"
 compatibility_date = "2026-09-01"
 
-# Keyless and stateless: no bindings and no secrets. Torob needs no login
-# token and this server never signs in.
+# Keyless: no secrets, and no KV, R2 or service bindings. Torob needs no login
+# token and this server never signs in. The one binding below is the rate
+# limiter's own Durable Object.
 #
-# The rate limiter counts each client's calls in a Durable Object so the number
-# is exact and the same in every colo; without this binding the Worker falls back
-# to a per-colo cache, which is weaker but never fatal.
+# The rate limiter counts each client's calls in that Durable Object so the
+# number is exact and the same in every colo; without the binding the Worker
+# falls back to a per-colo cache, which is weaker but never fatal.
 [[durable_objects.bindings]]
 name = "RATE_LIMITER"
 class_name = "RateLimiter"

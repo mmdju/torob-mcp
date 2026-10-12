@@ -63,7 +63,7 @@ Search Torob, get **compact cards**: the cheapest offer in Toman, the shop behin
 | `filters` | object | Values from `available_filters` of the same query, e.g. `{"available": "1", "storage": "1 tb"}`. A value the search does not offer is refused with the real ones |
 | `limit` | number | How many cards (default 10, max 24 - upstream returns 24-26 rows a page whatever is asked) |
 
-Returns: `total_matches`, `total_matches_note`, `page`, `page_count` (how many cards **this page** held before `limit` trimmed it - not how many pages exist), `has_next_page`, `price_range_toman` (`{min, max}`), `price_bounds_toman`, `products[]`, `available_filters`, `brand_values`, `filters_applied`, `sort_meaning`, `attribution`. `total_matches_note` is there because Torob's own count moves between identical requests - page with `has_next_page` instead of quoting the number.
+Returns: `total_matches`, `total_matches_note`, `page`, `page_count` (how many cards **this page** held before `limit` trimmed it - not how many pages exist), `has_next_page`, `price_range_toman` (`{min, max}`), `price_bounds_toman`, `products[]`, `available_filters`, `brand_values`, `filters_applied`, `sort_meaning`, `attribution`. `total_matches_note` is there because Torob's own count moves between identical requests - page with `has_next_page` instead of quoting the number. When Torob's filter shape is one this server cannot read, `available_filters` comes back empty with `available_filters_note` beside it saying so: the products are still a complete answer, and only the narrowing surface is missing.
 
 Each card: `prk`, `name_fa`, `name_en`, `price_toman`, `price_text`, `available`, `shop_name`, `image`, `image_count`, `badges[]`, `url`, `is_adv`, `details_url`.
 

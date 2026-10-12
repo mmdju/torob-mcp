@@ -374,28 +374,46 @@ const DETAIL_URL_MEMORY = 500;
 // A Worker may finish a request before a floating promise settles, and a cache
 // write that was never awaited is exactly how the shared name used to go
 // missing: the entry survived only in the isolate that learned it. Anything
-// that has to outlive the response goes through here - the Worker hands over
-// its `waitUntil`, and Node simply lets the promise run.
+// that has to outlive the response therefore goes through here - the Worker
+// hands the promise to its `waitUntil`, and Node simply lets it run.
 export interface WaitUntil {
   waitUntil(promise: Promise<unknown>): void;
 }
 
-let keepAliveFn: ((promise: Promise<unknown>) => void) | null = null;
+// Whether this runtime can outlive a response at all. A Worker can (it is given
+// an ExecutionContext); Node cannot - and the answer never changes inside one
+// process, so it is set once when the server is built, not on every tool call.
+//
+// It is deliberately NOT a sink. Storing the current request's `waitUntil` here
+// was the obvious shape and it is wrong: an isolate serves requests
+// concurrently, so a second tool call overwrote the first's sink and the first
+// call's writes were handed to a context that could already be gone - silently
+// dropping the very memory this design leans on. What is stored instead is the
+// promises themselves. The dispatch drains the queue into *its own* context on
+// the way out, so a write issued during any call is registered on a context
+// that is live at the moment it is registered, whatever else is running at the
+// same time.
+let waitUntilEnabled = false;
 
-export function setWaitUntil(fn: ((promise: Promise<unknown>) => void) | null): void {
-  keepAliveFn = fn;
+export function setWaitUntilEnabled(value: boolean): void {
+  waitUntilEnabled = value;
+}
+
+const pendingWrites = new Set<Promise<unknown>>();
+
+/** Everything queued since the last drain, and nothing after it. */
+export function takePendingWrites(): Promise<unknown>[] {
+  const out = [...pendingWrites];
+  pendingWrites.clear();
+  return out;
 }
 
 function keepAlive(promise: Promise<unknown>): void {
-  if (!keepAliveFn) {
-    void promise;
-    return;
-  }
-  try {
-    keepAliveFn(promise);
-  } catch {
-    void promise;
-  }
+  // A rejected write must never become an unhandled rejection: this layer can
+  // only ever save or cost one extra upstream request.
+  const guarded = promise.catch(() => undefined);
+  if (!waitUntilEnabled) return;
+  pendingWrites.add(guarded);
 }
 
 function rememberResolved(prk: string, url: string, name: string | null): void {
@@ -816,6 +834,13 @@ export interface SearchResult {
   suggested_categories: { id: string; title: string }[];
   /** Every filter group this search accepts, with its slug. */
   available_filters: FilterGroup[];
+  /**
+   * Set when the groups above could not be read. The products are still a
+   * complete answer - only the narrowing surface is missing, and saying so is
+   * the difference between "this search takes no filters" and "this server and
+   * Torob disagree about the shape".
+   */
+  available_filters_note?: string;
   spellcheck: { corrected: string | null; original: string } | null;
   attribution: string;
 }
@@ -960,11 +985,24 @@ function filterGroupsOf(raw: RawSearch): FilterGroup[] {
   // Rows that exist and cannot be read are not "this search takes no filters".
   // The same rule the location endpoints follow, for the same reason: an empty
   // list reads as a real answer while a wrong field name is a bug.
-  if (out.size === 0 && rows > 0) {
+  //
+  // The second half of the check is the one that catches a *rename*. The first
+  // only fires while the four source arrays still exist; if upstream moves the
+  // groups onto a key this server does not read, `rows` stays 0 and an empty
+  // list would slip through as a real answer - which is exactly the failure
+  // this guard is here to prevent. A search that came back with products and
+  // advertises no filter surface at all is that case, since every live search
+  // measured carries at least the price group. An empty result set may
+  // legitimately carry nothing, so it is the products that make it an error.
+  const hadProducts = Array.isArray(raw.results) && raw.results.length > 0;
+  if (out.size === 0 && (rows > 0 || hadProducts)) {
+    const unreadable =
+      rows > 0
+        ? `${rows} filter group(s) this server could not read`
+        : "no filter surface at all, though the search returned products";
     throw new UpstreamError(
-      `Torob answered this search with ${rows} filter group(s) this server could not read. The API shape ` +
-        `may have changed, so this is reported instead of an empty filter list - "this search takes no ` +
-        `filters" would be a different answer.`,
+      `Torob answered this search with ${unreadable}. The API shape may have changed, so this is reported ` +
+        `instead of an empty filter list - "this search takes no filters" would be a different answer.`,
       "http"
     );
   }
@@ -1077,10 +1115,16 @@ export async function rememberedFilterGroups(key: string): Promise<FilterGroup[]
 export async function searchProducts(opts: SearchOptions): Promise<SearchResult> {
   const raw = await searchRaw(opts);
   const result = projectSearch(raw, opts);
-  rememberFilterGroups(
-    filterMemoryKey(opts.q, { category: opts.category, city: opts.city, shopType: opts.shopType }),
-    result.available_filters
-  );
+  // Only a surface that was actually read teaches the next call. An unreadable
+  // one is a disagreement with Torob rather than a fact about this query, and
+  // remembering it would bless an empty list for the next half hour - making
+  // the note above a one-off instead of the warning it is meant to be.
+  if (result.available_filters.length) {
+    rememberFilterGroups(
+      filterMemoryKey(opts.q, { category: opts.category, city: opts.city, shopType: opts.shopType }),
+      result.available_filters
+    );
+  }
   return result;
 }
 
@@ -1130,6 +1174,18 @@ function projectSearch(raw: RawSearch, opts: SearchOptions): SearchResult {
   const total = Math.max(0, Math.round(num(raw.count, 0)));
   const spell = raw.spellcheck as { corrected_query?: unknown; initial_query?: unknown } | undefined;
   const brands = brandValuesOf(raw);
+  // The filter surface is a report about one part of the payload, so a change
+  // upstream must not take the products down with it: they are already here,
+  // and they are what answered the question. The read is allowed to fail loudly
+  // *about itself* - the failure travels as available_filters_note beside an
+  // empty list, never as a dead search.
+  let availableFilters: FilterGroup[] = [];
+  let availableFiltersNote: string | null = null;
+  try {
+    availableFilters = filterGroupsOf(raw);
+  } catch (err) {
+    availableFiltersNote = err instanceof Error ? err.message : String(err);
+  }
 
   return {
     products,
@@ -1149,7 +1205,8 @@ function projectSearch(raw: RawSearch, opts: SearchOptions): SearchResult {
     // The filter groups and attributes this search would accept. Reporting
     // them is what lets an agent narrow down without a second discovery call,
     // and it is how a caller learns the real slugs before using `filters`.
-    available_filters: filterGroupsOf(raw),
+    available_filters: availableFilters,
+    ...(availableFiltersNote ? { available_filters_note: availableFiltersNote } : {}),
     spellcheck: spell
       ? {
           corrected: str(spell.corrected_query).trim() || null,
@@ -1176,7 +1233,19 @@ async function detailsRaw(moreInfoUrl: string, prk: string, store = true): Promi
     if (remembered) return remembered;
     return torobGet<RawProduct>(moreInfoUrl);
   }
-  return cached(`d:${prk}`, TTL.product, () => torobGet<RawProduct>(moreInfoUrl));
+  // Filed under the id that was asked for, and only when the payload agrees
+  // with it. The id-only probe below already checks this, because it is the
+  // caller most likely to be answered by a different product; a caller-supplied
+  // details_url is the other one, and `prkInUrl` can only compare when the URL
+  // happens to carry the id in it. A payload that names another product is
+  // still the answer to this call - the page really was opened - but it is
+  // never filed here, so it can never be served later as this product.
+  return cached(`d:${prk}`, TTL.product, () => torobGet<RawProduct>(moreInfoUrl), {
+    accept: (raw) => {
+      const answered = str(raw?.random_key).trim();
+      return !answered || answered === prk;
+    },
+  });
 }
 
 // A product id on its own is NOT a search term, and this was measured: feeding
@@ -2147,17 +2216,34 @@ function assertReadable(list: unknown[], raw: { results?: unknown }, what: strin
 }
 
 export async function provinces(): Promise<Province[]> {
-  const raw = (await cached("prov", TTL.locations, () =>
-    torobGet<any>("/v4/province/list/?size=200")
-  )) as { results?: unknown };
-  const out: Province[] = [];
-  for (const p of Array.isArray(raw?.results) ? raw.results : []) {
-    const id = str(p?.id ?? p?.province_id).trim();
-    const name = nameOf(p);
-    if (id && name) out.push({ id, name });
-  }
-  assertReadable(out, raw, "province list");
-  return out;
+  // Read and checked inside the cached fetch, on purpose: the cache stores
+  // whatever the fetcher returns, so an unreadable payload is the one shape
+  // that must not be allowed through. Filing an empty province list under a
+  // day-long key would answer "Iran has no provinces" long after upstream had
+  // fixed itself.
+  return cached("prov", TTL.locations, async () => {
+    const raw = (await torobGet<any>("/v4/province/list/?size=200")) as { results?: unknown };
+    const out: Province[] = [];
+    for (const p of Array.isArray(raw?.results) ? raw.results : []) {
+      const id = str(p?.id ?? p?.province_id).trim();
+      const name = nameOf(p);
+      if (id && name) out.push({ id, name });
+    }
+    assertReadable(out, raw, "province list");
+    // The rows-exist check above cannot see a *rename*: it re-reads the same
+    // `results` key, so a renamed container reads as "no rows" and that check
+    // never fires. Iran always has 31 provinces, so an empty list cannot be an
+    // answer - it is this server and Torob disagreeing about the shape, and it
+    // has to be said out loud rather than reported as an empty country.
+    if (out.length === 0) {
+      throw new UpstreamError(
+        `Torob answered the province list with no provinces this server could read (it always has 31). ` +
+          `The API shape may have changed, so this is reported instead of an empty list.`,
+        "http"
+      );
+    }
+    return out;
+  });
 }
 
 export async function cities(provinceId?: string, search?: string): Promise<City[]> {
@@ -2165,18 +2251,22 @@ export async function cities(provinceId?: string, search?: string): Promise<City
   if (provinceId) params.set("province", provinceId);
   if (search) params.set("search", search);
   const key = `city:${provinceId ?? ""}:${search ?? ""}`;
-  const raw = (await cached(key, TTL.locations, () =>
-    torobGet<any>(`/v4/city/list/?${params.toString()}`)
-  )) as { results?: unknown };
-  const out: City[] = [];
-  for (const c of Array.isArray(raw?.results) ? raw.results : []) {
-    const id = str(c?.id ?? c?.city_id).trim();
-    const name = nameOf(c);
-    if (!id || !name) continue;
-    out.push({ id, name, province_id: str(c?.province_id ?? c?.province) || null });
-  }
-  assertReadable(out, raw, "city list");
-  return out;
+  // Read inside the cached fetch for the same reason as the province list: a
+  // payload this server cannot read must not be the thing the cache remembers.
+  // (An empty city list, unlike an empty province list, is a real answer - a
+  // name that matches nothing - so only the unreadable case is refused here.)
+  return cached(key, TTL.locations, async () => {
+    const raw = (await torobGet<any>(`/v4/city/list/?${params.toString()}`)) as { results?: unknown };
+    const out: City[] = [];
+    for (const c of Array.isArray(raw?.results) ? raw.results : []) {
+      const id = str(c?.id ?? c?.city_id).trim();
+      const name = nameOf(c);
+      if (!id || !name) continue;
+      out.push({ id, name, province_id: str(c?.province_id ?? c?.province) || null });
+    }
+    assertReadable(out, raw, "city list");
+    return out;
+  });
 }
 
 // -------------------------------------------------------------------- offers

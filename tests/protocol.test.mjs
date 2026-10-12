@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer } from "../dist/server.js";
+import { takePendingWrites } from "../dist/project.js";
 import { setPaceForTests, setRetryDelayForTests } from "../dist/http.js";
 
 setPaceForTests(0);
@@ -40,7 +41,15 @@ const SEARCH_BODY = {
   next: "",
 };
 
-async function connected() {
+// A stand-in for the Worker's ExecutionContext. It does nothing but collect
+// what a tool call leaves behind, which is enough to watch whether a store
+// write reaches a context that is alive to receive it.
+function fakeCtx() {
+  const held = [];
+  return { held, waitUntil: (promise) => held.push(promise) };
+}
+
+async function connected(ctx) {
   globalThis.fetch = async () => {
     fetchCalls++;
     return new Response(JSON.stringify(SEARCH_BODY), {
@@ -49,15 +58,15 @@ async function connected() {
   };
 
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const server = buildServer();
+  const server = buildServer(ctx);
   await server.connect(serverTransport);
   const client = new Client({ name: "protocol-test", version: "0" });
   await client.connect(clientTransport);
   return { client, server };
 }
 
-async function using(fn) {
-  const { client, server } = await connected();
+async function using(fn, ctx) {
+  const { client, server } = await connected(ctx);
   try {
     return await fn(client);
   } finally {
@@ -123,4 +132,40 @@ test("a successful call comes back as parseable JSON in one text block", async (
     assert.equal(payload.products[0].prk, "prk-proto");
     assert.equal(fetchCalls, 1, "exactly one upstream call for one search");
   });
+});
+
+test("a tool call hands the store writes it left behind to its own request context", async () => {
+  // What a Worker does with the promises a tool call never awaited: only
+  // `waitUntil` keeps them past the response, and a write that never reaches
+  // one is simply lost - the next isolate re-learns the product name, or spends
+  // an upstream request rediscovering a wall that is still up.
+  const ctx = fakeCtx();
+  await using(async (client) => {
+    const result = await client.callTool({ name: "search_products", arguments: { query: "گوشی" } });
+    assert.notEqual(result.isError, true, `unexpected error: ${JSON.stringify(result)}`);
+  }, ctx);
+
+  assert.ok(ctx.held.length >= 1, "the call remembered a product, so its writes must reach the context");
+  // Every one of them has to settle: a rejected store write is swallowed by
+  // design, and an unhandled rejection is what it would otherwise become.
+  await Promise.all(ctx.held);
+  assert.equal(takePendingWrites().length, 0, "nothing is left queued once the call is over");
+});
+
+test("two overlapping calls do not strand each other's writes", async () => {
+  // The shape this guards against: the sink used to be one module-level
+  // variable holding "the current request's waitUntil", so a second call
+  // overwrote the first's and the first's writes were handed to a context that
+  // could already be gone. What matters is not which context takes a write -
+  // both are live here - but that none is left in a queue nobody drains.
+  const first = fakeCtx();
+  const second = fakeCtx();
+  await Promise.all([
+    using(async (client) => client.callTool({ name: "search_products", arguments: { query: "گوشی" } }), first),
+    using(async (client) => client.callTool({ name: "search_products", arguments: { query: "قاب" } }), second),
+  ]);
+
+  assert.ok(first.held.length + second.held.length >= 1, "the writes have to be registered somewhere");
+  await Promise.all([...first.held, ...second.held]);
+  assert.equal(takePendingWrites().length, 0, "and nothing is left queued for nobody");
 });

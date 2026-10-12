@@ -6,10 +6,10 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { UpstreamError } from "./http.js";
-import { setWaitUntil, type WaitUntil } from "./project.js";
+import { setWaitUntilEnabled, takePendingWrites, type WaitUntil } from "./project.js";
 import { READ_ONLY, TOOLS } from "./tools.js";
 
-export const VERSION = "0.5.7";
+export const VERSION = "0.5.8";
 
 // Server-level guidance: cheaper than repeating it in every tool description,
 // and it steers the agent before it picks a tool at all. It is the first thing
@@ -70,7 +70,27 @@ export const INSTRUCTIONS = [
   "web API only.",
 ].join(" ");
 
+/**
+ * Hand every store write this dispatch issued to the request's own context.
+ *
+ * Draining once, at the end of the call, is the point: an isolate serves
+ * requests concurrently, so a write made during call A can only be registered
+ * on a context that is known to be live at that moment. A context stored
+ * earlier and read later is exactly the shape that used to hand A's writes to
+ * B's (already finished) context, and drop them. An error path drains too - a
+ * call that remembered a product's name before failing is the write most worth
+ * keeping.
+ */
+function keepAliveWrites(ctx?: WaitUntil): void {
+  if (!ctx) return;
+  for (const promise of takePendingWrites()) ctx.waitUntil(promise);
+}
+
 export function buildServer(ctx?: WaitUntil): Server {
+  // Whether a store write can outlive this response is a fact about the runtime
+  // rather than about the call: a Worker is given an ExecutionContext, Node has
+  // nothing to hand a promise to.
+  setWaitUntilEnabled(Boolean(ctx));
   const server = new Server(
     { name: "torob-mcp", version: VERSION },
     { capabilities: { tools: {} }, instructions: INSTRUCTIONS }
@@ -96,9 +116,6 @@ export function buildServer(ctx?: WaitUntil): Server {
     }
     try {
       const args = (req.params.arguments || {}) as Record<string, unknown>;
-      // Anything a tool writes to the per-colo cache has to outlive this
-      // response, and in a Worker only `waitUntil` can promise that.
-      setWaitUntil(ctx ? (promise) => ctx.waitUntil(promise) : null);
       const data = await tool.run(args);
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     } catch (err) {
@@ -107,6 +124,10 @@ export function buildServer(ctx?: WaitUntil): Server {
           ? err.message
           : `Unexpected error: ${err instanceof Error ? err.message : String(err)}`;
       return { content: [{ type: "text", text: message }], isError: true };
+    } finally {
+      // Anything a tool wrote to the per-colo cache has to outlive this
+      // response, and in a Worker only `waitUntil` can promise that.
+      keepAliveWrites(ctx);
     }
   });
 

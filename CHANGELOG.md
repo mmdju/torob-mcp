@@ -2,6 +2,30 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
+## 0.5.8 - 2026-10-12
+
+A pass over the whole server against itself: a race that could quietly drop the memory the design leans on, two guards that could be beaten by the very change they exist to catch, one caller that could file a product's page under another product's id, and the small print around `GET /mcp`.
+
+### Fixed
+
+- **Two overlapping tool calls can no longer drop each other's store writes.** What a call left behind was handed to whatever request context was stored in a module-level variable when the write happened - and an isolate serves requests concurrently, so a second call overwrote the first's, and the first call's writes went to a context that could already be gone. The promises are now queued and drained once, at the end of *their own* dispatch, into a context that is live at that moment. What it cost before: an extra upstream search to re-find a product name, or a wall marker another isolate never saw.
+- **A filter shape change no longer fails the whole search.** The filter groups were read *after* the products were fetched, so an unreadable shape turned a good answer into an error for as long as the raw payload stayed cached (thirty minutes). The products survive, and the disagreement travels as `available_filters_note` beside an empty `available_filters` - the report is still loud, the answer is no longer thrown away.
+- **The unreadable-shape tripwire now catches a rename, not only a bad field.** It fired only while the source arrays still existed; if upstream moves the groups onto a key this server does not read, `rows` was 0 and an empty list slipped through as "this search takes no filters" - the exact failure it exists to prevent. A search that came back with **products** and advertises no filter surface at all is now refused, since every live search measured carries at least the price group. An empty result set may legitimately carry nothing, and says nothing.
+- **An unreadable filter surface is no longer remembered.** The per-query filter memory exists so a repeat call can validate before spending an upstream request; filing a surface this server could not read would have blessed an empty list for the next half hour, so the next caller with a filter was refused a list of accepted filters that was itself empty.
+- **A province list that comes back empty is a failure, not an empty country.** The rows-exist check cannot see a rename - it re-reads the same `results` key, so a renamed container reads as "no rows" and the check never fires. Iran always has 31 provinces, so an empty answer is refused outright.
+- **The location lists are read and checked inside the cached fetch.** Both were projected after the cache had stored the payload, so a payload this server could not read was the thing the day-long cache remembered. The check now runs where the fetcher runs: nothing that was rejected is ever filed.
+- **A `details_url` that opens another product is never filed under the id it was asked for.** The id-only probe already compared the answer's id before storing it; a caller-supplied URL is the other caller that can be handed a different product, and the id inside the URL is only compared when the URL carries one. The answer still reaches the caller - the page really was opened - it just cannot be served later as the product it was not.
+- **`HEAD /mcp` answers what `GET /mcp` would**, with the headers and no body, on both transports. A proxy or health check that probed with HEAD fell through to 404, which reads as "this is not an MCP endpoint" when it is one.
+
+### Changed
+
+- Docs and comments that had drifted: `src/tools.ts` counted fourteen tools (there are fifteen), `wrangler.toml` said "no bindings" six lines above the Durable Object binding, and both READMEs said `GET /mcp` serves the connect page without saying that is now the browser's answer alone - every other client gets `405`.
+
+### Coverage
+
+- Eleven tests: the store-write queue reaching its own context (and nothing left stranded when two calls overlap), the filter shape change reported beside its products, the rename case, an empty result set saying nothing, an unreadable surface not being remembered, an empty province list refused, an unreadable location list not being cached, a `details_url` mismatch answered but not filed, `cached()`'s new accept predicate, and `HEAD /mcp`.
+- Each new behavioural test was checked against the code *without* its fix: all of them fail, and pass again with it.
+
 ## 0.5.7 - 2026-10-12
 
 The hosted copy was burning its Cloudflare plan every day, and none of it was tool calls.

@@ -104,6 +104,22 @@ test("GET /mcp still serves the human connect page to a browser", async () => {
   assert.match(html, /\/doran-\d{3}\.woff2/);
 });
 
+test("HEAD /mcp answers what GET would, with the headers and no body", async () => {
+  // A proxy or a health check that probes with HEAD used to fall through to
+  // 404, which reads as "this is not an MCP endpoint" when it is one.
+  const refused = await worker.fetch(new Request("https://torob-mcp.test/mcp", { method: "HEAD" }));
+  assert.equal(refused.status, 405, "a HEAD must get the same status a GET would");
+  assert.equal(refused.headers.get("allow"), "POST");
+  assert.equal(await refused.text(), "", "and no body");
+
+  const page = await worker.fetch(
+    new Request("https://torob-mcp.test/mcp", { method: "HEAD", headers: { accept: "text/html" } })
+  );
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get("content-type") ?? "", /text\/html/);
+  assert.equal(await page.text(), "", "the connect page is not sent twice");
+});
+
 test("the landing page is Persian and RTL", async () => {
   const res = await worker.fetch(new Request("https://torob-mcp.test/"));
   const html = await res.text();

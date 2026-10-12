@@ -72,7 +72,12 @@ function put(key: string, value: unknown, ttlMs: number): void {
 export async function cached<T>(
   key: string,
   ttlMs: number,
-  fn: () => Promise<T>
+  fn: () => Promise<T>,
+  // `accept` is the last word on whether a value is worth keeping. The details
+  // path uses it so a payload that answers for a *different* product is still
+  // handed to the caller but never filed under the id it was asked for - the
+  // same rule the id-only probe follows, without giving up the answer.
+  opts?: { accept?: (value: T) => boolean }
 ): Promise<T> {
   const now = Date.now();
   const hit = store.get(key);
@@ -82,7 +87,7 @@ export async function cached<T>(
   const p = fn().finally(() => inflight.delete(key));
   inflight.set(key, p);
   const value = await p;
-  put(key, value, ttlMs);
+  if (!opts?.accept || opts.accept(value)) put(key, value, ttlMs);
   return value;
 }
 

@@ -1,4 +1,4 @@
-// torob-mcp tools. Fourteen read-only tools.
+// torob-mcp tools. Fifteen read-only tools.
 //
 // The split that matters: a search card shows the CHEAPEST offer only, because
 // that is the one number a shopper asks for. Every seller behind that number
@@ -398,6 +398,9 @@ const searchTool: ToolDef = {
       ...(found.price_bounds_toman ? { price_bounds_toman: found.price_bounds_toman } : {}),
       products: found.products.slice(0, limit),
       available_filters: found.available_filters,
+      // Present only when the groups could not be read: the products above are
+      // still a complete answer, the narrowing surface is what is missing.
+      ...(found.available_filters_note ? { available_filters_note: found.available_filters_note } : {}),
       // The brand group above is a preview; when the search offers more brands
       // than it shows, the full list (with the ids `brand` needs) travels here.
       ...(found.brand_values.length > OPTION_PREVIEW || found.brand_values_truncated

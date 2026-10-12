@@ -81,7 +81,13 @@ async function main() {
             try { await reqServer.close(); } catch { /* ignore */ }
           }
         });
-      } else if (req.method === "GET" && (path === "/mcp" || (path || "").startsWith("/mcp?"))) {
+      } else if (
+        // HEAD answers what GET would: a proxy or health check that probes with
+        // HEAD used to fall through to 404, which reads as "not an MCP
+        // endpoint" when it is one. Node drops the body for a HEAD on its own.
+        (req.method === "GET" || req.method === "HEAD") &&
+        (path === "/mcp" || (path || "").startsWith("/mcp?"))
+      ) {
         // Same rule as worker.ts: the transport is GET-stream-or-405, and a
         // browser is the only client that asks for text/html. Answering 200
         // with HTML here is what made the hosted worker burn its quota - the

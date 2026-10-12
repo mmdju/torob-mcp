@@ -10,7 +10,7 @@
 
 **Real Torob knowledge for AI agents.** Search **Iran's price-comparison engine** from any MCP client (Cline, Cursor, Claude Desktop...): **prices in Toman**, every seller's offer on one product, price history, Torob's own product guides, shop profiles, today's deals. **Read-only, no API key, no login** - and answers measured in kilobytes instead of the ~70KB search page they came from.
 
-**Live endpoint:** `https://torob-mcp.mmdju3.workers.dev/mcp` (Streamable HTTP, stateless) - opening the bare address in a browser shows [the site](https://torob-mcp.mmdju3.workers.dev/), and `GET /mcp` gets the connect page instead of a JSON error.
+**Live endpoint:** `https://torob-mcp.mmdju3.workers.dev/mcp` (Streamable HTTP, stateless) - opening the bare address in a browser shows [the site](https://torob-mcp.mmdju3.workers.dev/). `GET /mcp` gives a browser the connect page and every other client a `405` - the answer the MCP transport asks for, so no client reads the page as a stream that opened and ended.
 
 > [!IMPORTANT]
 > **The hosted copy is not the main version - it is a quick-test demo.** It runs on Cloudflare, which Torob scores as a datacenter client, so it is **rate limited (20 `/mcp` calls a minute per client IP)** and **Torob pauses it from time to time**. For real use, run the main version on your own machine (below): no limit of ours, and its calls come from your own connection. See [Status](#status).

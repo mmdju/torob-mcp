@@ -183,7 +183,10 @@ export default {
         return withRate(withCors(new Response("Bad request", { status: 400 })), verdict);
       }
     }
-    if (req.method === "GET" && url.pathname === "/mcp") {
+    // HEAD answers what GET would, with headers and no body: a proxy or health
+    // check that probes with HEAD used to fall through to 404, which reads as
+    // "this is not an MCP endpoint" when it is one.
+    if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/mcp") {
       // The transport rule: GET on the MCP endpoint either streams
       // `text/event-stream` or answers 405 - anything else is wrong
       // (modelcontextprotocol.io, "Listening for Messages from the Server").
@@ -204,22 +207,18 @@ export default {
       // A browser is the one client that asks for text/html, and it still gets
       // the page.
       const accept = (req.headers.get("accept") || "").toLowerCase();
-      if (accept.includes("text/html") && !accept.includes("text/event-stream")) {
-        return withCors(new Response(MCP_PAGE, {
-          headers: {
-            "content-type": "text/html; charset=utf-8",
-            "cache-control": "public, max-age=300",
-          },
-        }));
-      }
-      return withCors(new Response("Method Not Allowed: this server is stateless, POST to /mcp.", {
-        status: 405,
-        headers: {
-          allow: "POST",
-          "content-type": "text/plain; charset=utf-8",
-          "cache-control": "no-store",
-        },
-      }));
+      const wantsPage = accept.includes("text/html") && !accept.includes("text/event-stream");
+      return withCors(
+        new Response(
+          req.method === "HEAD" ? null : wantsPage ? MCP_PAGE : "Method Not Allowed: this server is stateless, POST to /mcp.",
+          {
+            status: wantsPage ? 200 : 405,
+            headers: wantsPage
+              ? { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300" }
+              : { allow: "POST", "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+          }
+        )
+      );
     }
     if (req.method === "GET" && url.pathname === "/health") {
       // The version is part of health on purpose: the docs advertise the
