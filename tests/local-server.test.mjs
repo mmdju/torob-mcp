@@ -11,8 +11,25 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer } from "node:net";
+import { VERSION } from "../dist/server.js";
 
 let dir;
+
+// A port nothing is listening on, rather than a fixed one that something else
+// may have taken: this file runs beside the rest of the suite, and CI runs on
+// a machine whose 3000 belongs to nobody's business but is not free.
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      probe.close(() => resolve(port));
+    });
+  });
+}
 
 before(() => {
   dir = mkdtempSync(join(tmpdir(), "torob-mcp-local-"));
@@ -99,6 +116,56 @@ test("node dist/index.js serves MCP over stdio and creates its store", async () 
     assert.ok(existsSync(home), "the local server must create its store directory before serving");
   } finally {
     child.stdin.end();
+    child.kill();
+  }
+});
+
+test("node dist/index.js --http answers GET and HEAD /mcp the way the Worker does", async () => {
+  // The other transport, and until now the one nothing exercised: the Worker's
+  // GET /mcp rule was ported here in 0.5.7 and the HEAD rule in 0.5.8, and
+  // neither had a test on this side. A local run that answered 200 + HTML would
+  // put the same reconnect loop on the user's own machine that burned the
+  // hosted plan.
+  const port = await freePort();
+  const child = spawn(process.execPath, ["dist/index.js", "--http"], {
+    env: { ...process.env, TOROB_MCP_HOME: join(dir, "home-http"), PORT: String(port) },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    stderr += String(chunk);
+  });
+
+  const base = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + 15_000;
+  let ready = false;
+  while (!ready && Date.now() < deadline) {
+    try {
+      ready = (await fetch(`${base}/health`)).ok;
+    } catch {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+
+  try {
+    assert.ok(ready, `the local HTTP server never answered /health. stderr: ${stderr || "(empty)"}`);
+    assert.equal((await (await fetch(`${base}/health`)).json()).version, VERSION);
+
+    const refused = await fetch(`${base}/mcp`);
+    assert.equal(refused.status, 405, "a client that never asked for HTML must get 405, not the page");
+    assert.equal(refused.headers.get("allow"), "POST");
+
+    const head = await fetch(`${base}/mcp`, { method: "HEAD" });
+    assert.equal(head.status, 405, "a HEAD answers what a GET would");
+    assert.equal(await head.text(), "", "with the headers and no body");
+
+    const page = await fetch(`${base}/mcp`, { headers: { accept: "text/html" } });
+    assert.equal(page.status, 200, "a browser still gets the connect page");
+    assert.match(page.headers.get("content-type") ?? "", /text\/html/);
+
+    assert.equal((await fetch(`${base}/`)).status, 200, "and the landing page still answers");
+    // The tools are not touched: this is the transport, not the tools.
+  } finally {
     child.kill();
   }
 });

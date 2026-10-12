@@ -3,7 +3,11 @@
 
 import { HOUR, MIN } from "./cache.js";
 
-export const PORT = 3000;
+// 3000 by default, and overridable from the environment: a self-hosted run
+// often has something else on that port, and a test that spawns this server
+// needs one that is free rather than one that is merely unused today.
+const envPort = Number(process.env.PORT);
+export const PORT = Number.isInteger(envPort) && envPort > 0 && envPort < 65536 ? envPort : 3000;
 
 export const TOROB_API = "https://api.torob.com";
 export const TOROB_SITE = "https://torob.com";

@@ -16,6 +16,7 @@ A pass over the whole server against itself: a race that could quietly drop the 
 - **The location lists are read and checked inside the cached fetch.** Both were projected after the cache had stored the payload, so a payload this server could not read was the thing the day-long cache remembered. The check now runs where the fetcher runs: nothing that was rejected is ever filed.
 - **A `details_url` that opens another product is never filed under the id it was asked for.** The id-only probe already compared the answer's id before storing it; a caller-supplied URL is the other caller that can be handed a different product, and the id inside the URL is only compared when the URL carries one. The answer still reaches the caller - the page really was opened - it just cannot be served later as the product it was not.
 - **`HEAD /mcp` answers what `GET /mcp` would**, with the headers and no body, on both transports. A proxy or health check that probed with HEAD fell through to 404, which reads as "this is not an MCP endpoint" when it is one.
+- **The local `--http` transport has a test at last.** The GET /mcp rule was ported to it in 0.5.7 and the HEAD rule in this release, and neither was exercised: nothing ever started `node dist/index.js --http` and asked it. A local run answering 200 + HTML would put the same reconnect loop on the user's own machine that burned the hosted plan. `PORT` is now read from the environment (3000 when it is not set), so the test binds a port that is actually free rather than hoping 3000 is.
 
 ### Changed
 
@@ -23,7 +24,7 @@ A pass over the whole server against itself: a race that could quietly drop the 
 
 ### Coverage
 
-- Eleven tests: the store-write queue reaching its own context (and nothing left stranded when two calls overlap), the filter shape change reported beside its products, the rename case, an empty result set saying nothing, an unreadable surface not being remembered, an empty province list refused, an unreadable location list not being cached, a `details_url` mismatch answered but not filed, `cached()`'s new accept predicate, and `HEAD /mcp`.
+- Twelve tests: the store-write queue reaching its own context (and nothing left stranded when two calls overlap), the filter shape change reported beside its products, the rename case, an empty result set saying nothing, an unreadable surface not being remembered, an empty province list refused, an unreadable location list not being cached, a `details_url` mismatch answered but not filed, `cached()`'s new accept predicate, `HEAD /mcp`, and the local `--http` transport answering the same rules as the Worker.
 - Each new behavioural test was checked against the code *without* its fix: all of them fail, and pass again with it.
 
 ## 0.5.7 - 2026-10-12

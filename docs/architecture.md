@@ -84,7 +84,7 @@ Everything above runs in two places. The hosted Worker (`src/worker.ts`) and the
 
 ```bash
 node dist/index.js            # stdio - what an MCP client spawns
-node dist/index.js --http     # Streamable HTTP on :3000/mcp
+node dist/index.js --http     # Streamable HTTP on :3000/mcp, or whatever PORT is set to
 ```
 
 Or `npx -y github:mmdju/torob-mcp`, which builds through the `prepare` script on a checkout that has no `dist/` yet.
