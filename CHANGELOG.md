@@ -2,6 +2,19 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
+## 0.5.9 - 2026-10-12
+
+The docs described the bot challenge as a rule - where a call comes from decides it, and a connection Torob does not score passes - and pointed at two ways out as if they were fixes. A measurement taken today says the rule is softer than that, so what a caller is told had to change before what the docs claim did.
+
+### Changed
+
+- **The challenge message now says that some addresses are blocked outright and that nothing here changes that.** Measured 2026-10-12 from a Hetzner datacenter address: one request came back `200` with 70 KB of results, the next one 40 seconds later came back `490` with the 274 KB challenge page, and a third sent after five idle minutes was still `490` - no burst behind it, no repeated call, nothing wrong with the request, the very request that had just been answered in full. The message a caller sees used to explain only where the challenge comes from and to offer two ways out; it now says plainly that the request is not at fault, that no header or setting here unblocks an address, and that changing the network (running the server elsewhere, or `TOROB_API_BASE`) is worth trying and is not a cure - only Torob decides. The same sentence is in `DEMO_NOTE`, which stopped blaming "a Cloudflare Worker being a datacenter client": some addresses are refused whatever runs on them.
+- **`SECURITY.md`, `docs/architecture.md`, `docs/tools.md`, both READMEs, `wrangler.toml`, and the comments in `src/worker.ts`, `src/http.ts` and `src/config.ts` now carry both measurements** - 2026-10-09 (the address is judged, not the headers) and 2026-10-12 (an address can simply be refused) - and drop the phrasing that implied a non-scored connection would pass. The honest line everywhere is now: change where the calls come from, it may help, it does not guarantee anything.
+
+### Coverage
+
+- `tests/breaker.test.mjs`: the challenge message names an address being blocked outright, says nothing this server sends changes it, and ends on who decides.
+
 ## 0.5.8 - 2026-10-12
 
 A pass over the whole server against itself: a race that could quietly drop the memory the design leans on, two guards that could be beaten by the very change they exist to catch, one caller that could file a product's page under another product's id, and the small print around `GET /mcp`.

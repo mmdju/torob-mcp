@@ -25,8 +25,11 @@ new_sqlite_classes = ["RateLimiter"]
 # comes from. Measured 2026-10-09: an ordinary connection answered every request
 # shape and twelve searches 1.5s apart, while this network was challenged on its
 # third call of the minute - and a Worker's subrequests carry Cloudflare's own
-# `Cf-Worker` header, which cannot be stripped. See src/http.ts for how a 490 is
-# turned into an actionable error rather than an empty result.
+# `Cf-Worker` header, which cannot be stripped. Measured 2026-10-12: from a
+# datacenter address one request answered in full and the next one, 40 seconds
+# later, was challenged - so some addresses are simply blocked and nothing here
+# changes that. See src/http.ts for how a 490 is turned into an actionable error
+# rather than an empty result.
 #
 # Optional, for a copy that keeps being challenged: send every upstream call
 # through a relay of your own. An unusable value stops the Worker with the

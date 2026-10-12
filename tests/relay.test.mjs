@@ -2,9 +2,11 @@
 // pointed at a relay. Measured 2026-10-09: an ordinary connection answered every
 // request shape and twelve searches 1.5s apart, while a Cloudflare Worker drew a
 // challenge on its third call of the minute - and a Worker's subrequests carry
-// Cloudflare's own `Cf-Worker` header, which cannot be stripped. These tests keep
-// the switch honest: it moves every upstream call (including the URLs handed out
-// to callers), and a value that cannot be used fails loudly.
+// Cloudflare's own `Cf-Worker` header, which cannot be stripped. Measured
+// 2026-10-12: the lever only changes which address Torob sees, and an address
+// that is already blocked stays blocked - these tests keep the switch honest,
+// not effective: it moves every upstream call (including the URLs handed out to
+// callers), and a value that cannot be used fails loudly.
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { setPaceForTests } from "../dist/http.js";

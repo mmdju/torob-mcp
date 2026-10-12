@@ -120,36 +120,41 @@ export const ATTRIBUTION =
 // caller to give up, and the gate in http.ts keeps the calls behind the first
 // challenge from hammering while it waits.
 //
-// Measured 2026-10-09: what decides a challenge is where the call comes from, not
-// what it carries. From an ordinary connection every request shape was answered
-// (this server's headers, a full Chrome set, the site's own cookies, and none),
-// and twelve searches 1.5s apart were all answered; from Cloudflare's network
-// three calls in a minute drew the 490, and a Worker's subrequests carry
-// Cloudflare's own `Cf-Worker` header, which cannot be stripped. That is why the
-// message names the egress and points at the two real ways out: run the server
-// yourself, or send it through a relay (TOROB_API_BASE).
+// Measured 2026-10-09: what a challenge is made on is the address the call
+// comes from, not what it carries. From one connection every request shape was
+// answered (this server's headers, a full Chrome set, the site's own cookies,
+// and none) and twelve searches 1.5s apart all went through, while the same
+// calls from Cloudflare's network drew the 490 on the third of the minute.
+//
+// Measured 2026-10-12 from a Hetzner datacenter address: one request came back
+// 200 with 70KB of results, the next one 40 seconds later came back 490, and a
+// third sent after five idle minutes was still 490 - no burst behind it, no
+// repeated call, nothing wrong with the request. So an address can simply be
+// blocked on Torob's side, and the message says that plainly instead of
+// promising that a different network will fix it. Where the calls come from is
+// the only lever a caller has (run the server yourself, or send it through a
+// relay with TOROB_API_BASE); it is worth trying and it is not a cure.
 export const CHALLENGED_MSG =
   "Torob answered with a bot challenge (HTTP 490) instead of data, because its edge judged " +
   "this client a bot. This is not a rate limit and an immediate retry will not clear it - " +
   "it clears after a stretch with no calls at all, measured anywhere from a few minutes to " +
   "half an hour. Wait, then retry the same call; or ask the user to search on torob.com and " +
-  "share the product URL. What decides it is where the call comes from rather than what it " +
-  "sends: measured 2026-10-09, an ordinary connection answered every request shape and twelve " +
-  "searches 1.5s apart, while a Cloudflare Worker was challenged on its third call of the " +
-  "minute - a Worker's subrequests carry Cloudflare's `Cf-Worker` header, which cannot be " +
-  "removed. To stop seeing this: run this server yourself (npx -y github:mmdju/torob-mcp), or " +
-  "set TOROB_API_BASE to a relay on a connection Torob does not score as a bot.";
+  "share the product URL. Some IP addresses are blocked outright on Torob's side and nothing " +
+  "this server sends changes that: the request itself is not at fault, so no header and no " +
+  "setting here unblocks it. Running this server from a different network " +
+  "(npx -y github:mmdju/torob-mcp) or pointing TOROB_API_BASE at a relay changes the address " +
+  "Torob sees and may well help - but only Torob decides.";
 
 // The hosted Worker is a quick look, not something to depend on: it is rate
-// limited, and Torob scores a datacenter client - which is what a Worker is -
-// as a bot far sooner than an ordinary connection (measured 2026-10-09: three
-// calls in a minute there, twelve at the same pace from a home connection).
+// limited, and Torob challenges some addresses outright - a Worker is one of
+// them (measured 2026-10-09: three calls in a minute there), but so is an
+// ordinary datacenter address that simply got blocked (2026-10-12, below).
 // Both places a caller can stop - this service's own 429 and Torob's wall -
 // therefore say so and name the version without either, so a visitor is never
 // left thinking the tools are broken. Only the Worker appends it.
 export const DEMO_NOTE =
   " Note: this is the hosted quick-test copy - rate limited, and paused by Torob from time to time, " +
-  "because a Cloudflare Worker is a datacenter client. For unrestricted use, run the main version " +
+  "because Torob challenges some addresses outright. For unrestricted use, run the main version " +
   "yourself: npx -y github:mmdju/torob-mcp (source: https://github.com/mmdju/torob-mcp).";
 
 // Torob reports a shop score for essentially every offer but almost never

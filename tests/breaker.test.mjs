@@ -112,6 +112,20 @@ test("a local run does not advertise a limit it does not have", async () => {
   });
 });
 
+test("the challenge message says an address can be blocked outright", async () => {
+  // Measured 2026-10-12: one request answered in full, the next one 40 seconds
+  // later was challenged, and one sent after five idle minutes was still
+  // challenged - nothing wrong with the request. A message that only explained
+  // how to change the network would send a caller hunting for a setting that
+  // does not exist, so it has to say that some addresses are simply refused.
+  await assert.rejects(() => run("search_products", { query: "کلید-آدرس-بلاک" }), (err) => {
+    assert.match(err.message, /Some IP addresses are blocked outright/);
+    assert.match(err.message, /nothing this server sends changes that/);
+    assert.match(err.message, /only Torob decides/);
+    return true;
+  });
+});
+
 test("the breaker expires, so a later call gets a clean chance", async () => {
   await assert.rejects(() => run("search_products", { query: "x" }));
   assert.ok(breakerRemainingMs() > 0, "breaker should be open after a challenge");

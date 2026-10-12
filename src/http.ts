@@ -59,6 +59,14 @@ export function setPaceForTests(ms: number | null): void {
 // hide that, so the honest escape hatch is a relay on a connection that is not
 // scored as a bot: point this variable at it and every upstream call - and the
 // `details_url` handed to callers - goes there instead.
+//
+// Worth saying plainly, measured 2026-10-12: this lever changes which address
+// Torob sees, and that is all. From a Hetzner datacenter address one request
+// came back 200 with 70KB of results and the next one 40 seconds later came
+// back 490 - still 490 after five idle minutes. Some addresses are simply
+// blocked, no header or setting fixes them, and a relay on the address that is
+// already blocked buys nothing. Which is why the message above says so instead
+// of promising a configuration that works.
 let upstreamBase: string | null = null;
 
 export const UPSTREAM_BASE_ENV = "TOROB_API_BASE";

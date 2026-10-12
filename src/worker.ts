@@ -8,11 +8,15 @@
 // no cookies) all answered JSON, as did twelve searches 1.5s apart; from
 // Cloudflare's network, three calls in a minute drew a 274KB challenge page.
 // A Worker's subrequests also carry Cloudflare's `Cf-Worker` header, which
-// names the worker and cannot be stripped. So a hosted copy will be challenged
-// from time to time whatever this file does: http.ts turns a 490 into an
-// actionable error rather than an empty result, keeps the calls behind it from
-// spending requests, and can be pointed at a relay the operator controls with
-// the TOROB_API_BASE variable below.
+// names the worker and cannot be stripped. And an address can be refused
+// outright with nothing wrong at all: measured 2026-10-12, from a datacenter
+// address one request answered in full and the next one, 40 seconds later, was
+// challenged - still challenged after five idle minutes. So a hosted copy will
+// be challenged from time to time whatever this file does, and no setting here
+// changes that: http.ts turns a 490 into an actionable error rather than an
+// empty result, keeps the calls behind it from spending requests, and can be
+// pointed at a relay the operator controls with the TOROB_API_BASE variable
+// below - which may help, and does not guarantee anything.
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { DEMO_NOTE } from "./config.js";
 import { FONT_BIN } from "./fonts.js";
