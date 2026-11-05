@@ -182,6 +182,73 @@ test("a remembered filter set maps a display name onto its value", async () => {
   assert.match(seen, /storage=1(%20|\+)tb/);
 });
 
+// A rename upstream: the source arrays are still there, but the groups inside
+// them no longer carry the field this server reads them by.
+const unreadableFiltersPayload = {
+  ...searchPayload,
+  filters1: [{ title: "قیمت", key: "price", type: "price", items: [] }],
+  filters2: [],
+  attributes: [],
+};
+
+test("a filter shape change is reported beside the products, not instead of them", async () => {
+  // The products were already fetched by the time the filter surface is read,
+  // and they are what answered the question. Throwing away a good answer to
+  // protect a report about one field of it is the wrong trade: the whole search
+  // used to come back as an error for as long as the raw payload stayed cached.
+  stub(() => unreadableFiltersPayload);
+  const out = await run("search_products", { query: "شکل-فیلتر-خراب" });
+  assert.equal(out.products.length, 1, "the products are a complete answer and must survive");
+  assert.deepEqual(out.available_filters, []);
+  assert.match(out.available_filters_note, /could not read/);
+});
+
+test("a search that returned products but advertises no filter surface at all is reported", async () => {
+  // The check above only fires while the source arrays still exist. If upstream
+  // moves the groups onto a key this server does not read, the old check saw
+  // nothing to complain about and an empty list slipped through as "this search
+  // takes no filters" - the exact failure the guard exists to prevent. The
+  // products are what make it an error, since every live search measured
+  // carries at least the price group.
+  stub(() => {
+    const { filters1, filters2, attributes, ...rest } = searchPayload;
+    return rest;
+  });
+  const out = await run("search_products", { query: "بی‌فیلتر-کامل" });
+  assert.equal(out.products.length, 1);
+  assert.match(out.available_filters_note, /no filter surface/);
+});
+
+test("an empty result set may carry no filter surface, and says nothing", async () => {
+  // Nothing matched, so there is no result set for a filter surface to describe.
+  // That is a different answer from a search whose surface was lost, and only
+  // the second one earns a note.
+  stub(() => ({ results: [], count: 0, next: "" }));
+  const out = await run("search_products", { query: "چیزی-که-وجود-نداره" });
+  assert.deepEqual(out.products, []);
+  assert.equal(out.available_filters_note, undefined);
+});
+
+test("an unreadable filter surface is not remembered as 'this search takes no filters'", async () => {
+  // The filter memory exists so a repeat call can validate before spending an
+  // upstream request. Filing an unreadable surface there would bless an empty
+  // list for the next half hour: the next caller with a filter would be refused
+  // with a list of accepted filters that is itself empty.
+  const { filterMemoryKey, rememberedFilterGroups } = await import("../dist/project.js");
+  stub(() => unreadableFiltersPayload);
+  await run("search_products", { query: "حافظه-فیلتر-خراب" });
+  assert.equal(
+    await rememberedFilterGroups(filterMemoryKey("حافظه-فیلتر-خراب")),
+    null,
+    "a disagreement with Torob is not a fact about this query"
+  );
+
+  stub(() => searchPayload);
+  await run("search_products", { query: "حافظه-فیلتر-سالم" });
+  const remembered = await rememberedFilterGroups(filterMemoryKey("حافظه-فیلتر-سالم"));
+  assert.ok(remembered?.length, "a surface that was really read is what teaches the next call");
+});
+
 // ------------------------------------------------------------------ similar
 
 test("similar_products returns comparable products for one this server knows", async () => {
@@ -242,6 +309,16 @@ test("browse_categories needs a starting id and says which one", async () => {
 });
 
 // ---------------------------------------------------------------- locations
+
+// A bad province payload is checked inside the cached fetch, so it is never
+// remembered and this test can sit on either side of the good one below.
+test("a province list that comes back empty is a failure, not an empty country", async () => {
+  // The rows-exist check cannot see a rename: it re-reads the same `results`
+  // key, so a renamed container reads as "no rows" and that check never fires.
+  // Iran always has 31 provinces, so an empty list cannot be an answer.
+  stub(() => ({ count: 0, next: null, previous: null, results: [] }));
+  await assert.rejects(() => run("list_locations", {}), /always has 31/);
+});
 
 test("list_locations returns provinces when no province is given", async () => {
   // Live shape: {count, next, previous, results:[{id, name}]} - the field is
@@ -305,6 +382,12 @@ test("a wrong field name is a failure, not an empty answer", async () => {
   // shadow the province list cached above.
   stub(() => ({ count: 2, results: [{ wrong_field: 1 }, { wrong_field: 2 }] }));
   await assert.rejects(() => run("list_locations", { search: "شکل-خراب" }), /could not read/);
+  // And the unreadable payload is not what the cache remembers: the check runs
+  // inside the cached fetch, so a good answer later is read from upstream
+  // instead of being served from a rejection the cache had kept for a day.
+  stub(() => ({ count: 1, results: [{ id: 77, name: "شکل-درست" }] }));
+  const out = await run("list_locations", { search: "شکل-خراب" });
+  assert.equal(out.cities[0].name, "شکل-درست");
 });
 
 test("a city search that matches nothing reports an empty list", async () => {

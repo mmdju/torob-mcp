@@ -2,12 +2,25 @@
 // Keyless, so there is nothing to wire per request beyond a fresh Server.
 //
 // Torob's edge answers some clients with an arCAPTCHA page (HTTP 490) instead
-// of JSON. A Worker's own egress is not challenged - measured with 8 sequential
-// live searches, all 200 - so a 490 reaching this file means something changed
-// upstream and http.ts turns it into an actionable error rather than an empty
-// result.
+// of JSON, and it scores a client by where the call comes from rather than by
+// what it sends. Measured 2026-10-09: from an ordinary connection, five request
+// shapes (this server's headers, a full Chrome set, the site's own cookies, and
+// no cookies) all answered JSON, as did twelve searches 1.5s apart; from
+// Cloudflare's network, three calls in a minute drew a 274KB challenge page.
+// A Worker's subrequests also carry Cloudflare's `Cf-Worker` header, which
+// names the worker and cannot be stripped. And an address can be refused
+// outright with nothing wrong at all: measured 2026-10-12, from a datacenter
+// address one request answered in full and the next one, 40 seconds later, was
+// challenged - still challenged after five idle minutes. So a hosted copy will
+// be challenged from time to time whatever this file does, and no setting here
+// changes that: http.ts turns a 490 into an actionable error rather than an
+// empty result, keeps the calls behind it from spending requests, and can be
+// pointed at a relay the operator controls with the TOROB_API_BASE variable
+// below - which may help, and does not guarantee anything.
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { DEMO_NOTE } from "./config.js";
 import { FONT_BIN } from "./fonts.js";
+import { setHostedDemo, setUpstreamBase } from "./http.js";
 import { LANDING, MCP_PAGE } from "./landing.js";
 import { OG_IMAGE } from "./og-image.js";
 import {
@@ -64,7 +77,7 @@ function tooManyRequests(verdict: RateLimitVerdict): Response {
           message:
             `Too many requests: this service answers at most ${verdict.limit} /mcp calls a minute per client, ` +
             `and the window resets in ${verdict.retry_after_seconds} second(s). The limit belongs to this hosted ` +
-            `copy - a self-hosted run has none.`,
+            `quick-test copy - a self-hosted run has none.${DEMO_NOTE}`
         },
       }),
       {
@@ -92,6 +105,8 @@ interface WorkerContext {
 // colo cache rather than failing the request it was meant to protect.
 interface WorkerEnv {
   RATE_LIMITER?: DurableObjectNamespaceLike;
+  /** Optional relay for upstream calls - see setUpstreamBase in http.ts. */
+  TOROB_API_BASE?: string;
 }
 
 // The parts of a Durable Object this file uses, typed structurally: the project
@@ -125,6 +140,20 @@ export class RateLimiter {
 export default {
   async fetch(req: Request, env?: WorkerEnv, ctx?: WorkerContext): Promise<Response> {
     const url = new URL(req.url);
+    // This copy is the quick-test one: every message it can stop a caller on
+    // says so and points at the version without a limit.
+    setHostedDemo(true);
+    try {
+      setUpstreamBase(env?.TOROB_API_BASE);
+    } catch (err) {
+      // A misconfigured relay must not look like Torob being down: name it.
+      return withCors(
+        new Response(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        })
+      );
+    }
     if (req.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
@@ -158,10 +187,42 @@ export default {
         return withRate(withCors(new Response("Bad request", { status: 400 })), verdict);
       }
     }
-    if (req.method === "GET" && url.pathname === "/mcp") {
-      // Same page, same CORS as the POST route: a browser client that probes
-      // the endpoint with GET has to be able to read the answer.
-      return withCors(new Response(MCP_PAGE, { headers: { "content-type": "text/html; charset=utf-8" } }));
+    // HEAD answers what GET would, with headers and no body: a proxy or health
+    // check that probes with HEAD used to fall through to 404, which reads as
+    // "this is not an MCP endpoint" when it is one.
+    if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/mcp") {
+      // The transport rule: GET on the MCP endpoint either streams
+      // `text/event-stream` or answers 405 - anything else is wrong
+      // (modelcontextprotocol.io, "Listening for Messages from the Server").
+      //
+      // This used to be 200 + HTML, which a client does not read as an error -
+      // it reads it as a stream that opened and immediately ended. The official
+      // TypeScript SDK takes 200 as success, hands the HTML to an SSE parser
+      // that discards every line, watches the reader finish, and schedules a
+      // reconnect with its attempt counter hard-coded to 0 - so `maxRetries: 2`
+      // never applies. One GET a second per client session, for as long as the
+      // process lives: 232,748 requests on 2026-10-08 and 233,327 on 2026-10-10,
+      // all of this plan's 100,000/day. Caching never could have helped - there
+      // is no edge cache in front of workers.dev, and a cache hit would have
+      // been billed anyway. Every known client stops cleanly on 405; the SDK
+      // handles it with `return` and the comment "This is an expected case
+      // that should not trigger an error".
+      //
+      // A browser is the one client that asks for text/html, and it still gets
+      // the page.
+      const accept = (req.headers.get("accept") || "").toLowerCase();
+      const wantsPage = accept.includes("text/html") && !accept.includes("text/event-stream");
+      return withCors(
+        new Response(
+          req.method === "HEAD" ? null : wantsPage ? MCP_PAGE : "Method Not Allowed: this server is stateless, POST to /mcp.",
+          {
+            status: wantsPage ? 200 : 405,
+            headers: wantsPage
+              ? { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300" }
+              : { allow: "POST", "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+          }
+        )
+      );
     }
     if (req.method === "GET" && url.pathname === "/health") {
       // The version is part of health on purpose: the docs advertise the

@@ -58,3 +58,32 @@ test("concurrent readers of one key share a single upstream call", async () => {
   assert.deepEqual(await cached("k", 60000, fn), { n: 1 });
   assert.equal(calls, 1);
 });
+
+test("a value the caller refuses is answered but never stored", async () => {
+  // The details path opens a product by a URL the caller echoes back, and that
+  // URL can name a different product than the id it was asked about. The answer
+  // still reaches the caller - the page really was opened - but filing it under
+  // the wrong id would serve it later as that product, at that product's price.
+  setCacheLimitsForTests({ maxEntries: 10, maxBytes: 1024 });
+  let calls = 0;
+  const fn = async () => {
+    calls += 1;
+    return { random_key: "other" };
+  };
+  const accept = (v) => v.random_key === "x";
+  assert.deepEqual(await cached("d:x", 60000, fn, { accept }), { random_key: "other" }, "the caller is answered");
+  assert.equal(cachedGet("d:x"), undefined, "but the value is not filed under the id it disagreed with");
+  await cached("d:x", 60000, fn, { accept });
+  assert.equal(calls, 2, "so the next reader pays for a fresh fetch instead of inheriting the mismatch");
+});
+
+test("a value the caller accepts is stored, and the option is optional", async () => {
+  setCacheLimitsForTests({ maxEntries: 10, maxBytes: 1024 });
+  assert.deepEqual(await cached("plain", 60000, async () => ({ n: 1 })), { n: 1 });
+  assert.deepEqual(cachedGet("plain"), { n: 1 });
+  assert.deepEqual(
+    await cached("checked", 60000, async () => ({ n: 2 }), { accept: () => true }),
+    { n: 2 }
+  );
+  assert.deepEqual(cachedGet("checked"), { n: 2 });
+});

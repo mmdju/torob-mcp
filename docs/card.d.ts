@@ -25,7 +25,16 @@ export interface Offer {
   free_shipping: boolean | null;
   payment_on_delivery: boolean | null;
   same_day_delivery: string | null;
+  /** The shop's page on torob.com, e.g. https://torob.com/shop/392309/. */
   url: string | null;
+  /**
+   * Torob's own click-through (the site's "خرید اینترنتی" button): an
+   * api.torob.com redirect carrying tracking and a session id. Hand the user
+   * `url`; this one is for when they are about to click through.
+   */
+  buy_url: string | null;
+  /** Torob's own sentence about this seller, when it sent one. */
+  shop_note: string | null;
   /** Torob's own ad flag for this offer. */
   is_adv: boolean;
   /** Torob's postage line as sent, e.g. "هزینه ارسال ۷۰٫۰۰۰ تومان". */
@@ -107,7 +116,14 @@ export interface InPersonSeller {
   /** Torob's wording, e.g. "۸ ماه و ۹ روز پیش". */
   last_price_change_date: string | null;
   fast_delivery: boolean;
-  location: { lat: number; lon: number } | null;
+  /**
+   * Torob's own grade for this shop in the in-person list (5, 4, 3 …) - the
+   * badge the site shows beside its name. Torob's trust grade, not the 0-5
+   * shopper score an offer carries.
+   */
+  score: number | null;
+  /** Torob's own line for that grade, e.g. "خرید حضوری". */
+  score_note: string | null;
   /** The shop's page on torob.com. */
   url: string;
 }
@@ -237,7 +253,31 @@ export interface DetailsResponse {
   purchase_options?: PurchaseOption[];
   /** Torob's own flip; absent means "not claimed", never "fake". */
   is_authentic?: boolean;
+  /** Torob's own flip: product_guide is the call that reads the guide itself. */
   has_wiki?: boolean;
+  /** Present when Torob's own availability overrode the price-derived answer. */
+  availability_note?: string;
+  attribution: string;
+}
+
+/** One section of Torob's own guide for a product. */
+export interface GuideSection {
+  /** Torob's own heading, e.g. "نقاط قوت"; null for text before the first one. */
+  heading: string | null;
+  /** The heading's text, with markup removed and entities decoded. */
+  text: string;
+}
+
+/** The answer of product_guide: Torob's write-up, as text. */
+export interface ProductGuide {
+  prk: string;
+  title: string | null;
+  sections: GuideSection[];
+  /** Characters in the whole guide, before the requested cap. */
+  text_length: number;
+  truncated?: boolean;
+  note?: string;
+  guide_url: string;
   attribution: string;
 }
 

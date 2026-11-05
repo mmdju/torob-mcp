@@ -16,6 +16,7 @@
 
 import {
   CHALLENGED_MSG,
+  DEMO_NOTE,
   FETCH_TIMEOUT_MS,
   MAX_RETRIES,
   MIN_GAP_MS,
@@ -39,6 +40,86 @@ const retryDelay = (attempt: number) =>
 let testGapMs: number | null = null;
 export function setPaceForTests(ms: number | null): void {
   testGapMs = ms;
+}
+
+// Where upstream calls go. The default is Torob's own API; an operator can point
+// a deployment at a relay of their own with TOROB_API_BASE.
+//
+// The reason this exists, measured 2026-10-09: Torob's edge scores a client by
+// *where it comes from*, not by what it sends. From an ordinary connection, five
+// request shapes - the headers this server ships, a full Chrome header set, the
+// site's own page cookies and no cookies at all - all answered JSON, and twelve
+// searches 1.5s apart were all answered too. From Cloudflare's network the same
+// calls were challenged after three: a scratch Worker running `wrangler dev
+// --remote` got HTTP 490 with a 274KB arCAPTCHA page on its third search of the
+// minute, while the identical next call from the machine beside it returned
+// 49KB of JSON. A Worker subrequest also carries Cloudflare's own `Cf-Worker`
+// header, which names the worker and cannot be removed (a header of the same
+// name set in the fetch options arrives unchanged, beside it). Nothing here can
+// hide that, so the honest escape hatch is a relay on a connection that is not
+// scored as a bot: point this variable at it and every upstream call - and the
+// `details_url` handed to callers - goes there instead.
+//
+// Worth saying plainly, measured 2026-10-12: this lever changes which address
+// Torob sees, and that is all. From a Hetzner datacenter address one request
+// came back 200 with 70KB of results and the next one 40 seconds later came
+// back 490 - still 490 after five idle minutes. Some addresses are simply
+// blocked, no header or setting fixes them, and a relay on the address that is
+// already blocked buys nothing. Which is why the message above says so instead
+// of promising a configuration that works.
+let upstreamBase: string | null = null;
+
+export const UPSTREAM_BASE_ENV = "TOROB_API_BASE";
+
+/** Returns the message when `value` is not usable, null when it is. */
+function upstreamBaseProblem(value: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return `${UPSTREAM_BASE_ENV} must be an absolute URL, got '${value}'.`;
+  }
+  if (url.protocol !== "https:") {
+    return `${UPSTREAM_BASE_ENV} must use https: a plain-http relay would put every search, price and product id on the wire in the clear.`;
+  }
+  return null;
+}
+
+/**
+ * Point upstream calls at `value`, or back at Torob's own API with null/empty.
+ * Throws on a value that cannot be used, so a misconfigured deployment fails at
+ * the first request with the reason instead of quietly calling Torob anyway.
+ */
+export function setUpstreamBase(value?: string | null): void {
+  const raw = (value ?? "").trim();
+  if (!raw) {
+    upstreamBase = null;
+    return;
+  }
+  const problem = upstreamBaseProblem(raw);
+  if (problem) throw new Error(problem);
+  const url = new URL(raw);
+  upstreamBase = `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+}
+
+/** The base every upstream call is built on: the relay when one is set, else Torob. */
+export function upstreamBaseUrl(): string {
+  return upstreamBase ?? TOROB_API;
+}
+
+/**
+ * The URL for one path, which may itself be a URL this server handed out
+ * earlier - a card's `details_url` is exactly that, and a caller passes it back
+ * to open a product with no server-side memory involved. With a relay set, those
+ * URLs have to go through the relay too; leaving one on Torob's own host would
+ * hand the challenge back to the single call the relay was configured for.
+ */
+function upstreamUrlFor(path: string): string {
+  if (!path.startsWith("http")) return `${upstreamBaseUrl()}${path}`;
+  if (upstreamBase && /^https?:\/\/api\.torob\.com(\/|$)/.test(path)) {
+    return path.replace(/^https?:\/\/api\.torob\.com/, upstreamBase);
+  }
+  return path;
 }
 
 export class UpstreamError extends Error {
@@ -206,11 +287,21 @@ async function wallRemainingMs(): Promise<number> {
   return Math.max(0, wall.until - now);
 }
 
+// Set by the Worker entry point alone. The hosted copy is a quick-test one, and
+// the two messages a caller can stop at say so and name where the unlimited
+// version is; a local run is that version, so it never sets this.
+let hostedDemo = false;
+export function setHostedDemo(value: boolean): void {
+  hostedDemo = value;
+}
+const demoNote = () => (hostedDemo ? DEMO_NOTE : "");
+
 function wallClosed(waiting: number): UpstreamError {
   return new UpstreamError(
     `Torob challenged this server recently, so no call was made. It clears on its own - retry in ` +
       `about ${Math.ceil(waiting / 60_000)} minute(s). Nothing was searched, so no result below is ` +
-      `missing because of this.`,
+      `missing because of this.` +
+      demoNote(),
     "challenged"
   );
 }
@@ -238,7 +329,7 @@ async function closeWallIfEarned(startedAt: number): Promise<void> {
  * @param path Absolute URL, or a path relative to the API base.
  */
 export async function torobGet<T = unknown>(path: string, opts?: { retries?: number }): Promise<T> {
-  const url = path.startsWith("http") ? path : `${TOROB_API}${path}`;
+  const url = upstreamUrlFor(path);
   const retries = opts?.retries ?? MAX_RETRIES;
   let lastError: unknown = null;
 
@@ -276,7 +367,7 @@ export async function torobGet<T = unknown>(path: string, opts?: { retries?: num
         // behind it in a burst fail without spending an upstream request.
         if (looksLikeChallenge(res, body)) {
           await openWall();
-          throw new UpstreamError(CHALLENGED_MSG, "challenged", { status: res.status });
+          throw new UpstreamError(CHALLENGED_MSG + demoNote(), "challenged", { status: res.status });
         }
 
         // An answer that is not a challenge is the edge letting us through, so

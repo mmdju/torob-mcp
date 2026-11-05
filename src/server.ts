@@ -6,10 +6,10 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { UpstreamError } from "./http.js";
-import { setWaitUntil, type WaitUntil } from "./project.js";
+import { setWaitUntilEnabled, takePendingWrites, type WaitUntil } from "./project.js";
 import { READ_ONLY, TOOLS } from "./tools.js";
 
-export const VERSION = "0.5.3";
+export const VERSION = "0.5.9";
 
 // Server-level guidance: cheaper than repeating it in every tool description,
 // and it steers the agent before it picks a tool at all. It is the first thing
@@ -25,7 +25,7 @@ export const INSTRUCTIONS = [
   "or the word 'best', shop_profile when the seller itself is the question, find_shops to locate a shop by name " +
   "or city, search_by_image when the user shares a picture link, torob_trends for what shoppers are searching " +
   "right now, browse_categories to walk the category tree, list_locations for province and city " +
-  "ids, special_offers for the deals Torob is featuring.",
+  "ids, special_offers for the deals Torob is featuring, product_guide for Torob's own write-up of one model.",
   "A search card carries the CHEAPEST offer only, not every seller. To answer 'who sells this' or " +
   "'is that shop reliable' call product_details - that is where the full seller list, shop scores and " +
   "vote counts live - and shop_profile for the shop behind any offer's shop_id.",
@@ -39,6 +39,10 @@ export const INSTRUCTIONS = [
   "search_by_image takes a public image URL and nothing else, and its matched_product names the one product Torob " +
   "recognised in the picture, when it recognised one. shop_profile's include_products lists a shop's own " +
   "catalogue; pair it with the shop_id from a product_details offer.",
+  "product_guide reads Torob's own guide for one product - what the model is, its strengths and weaknesses, what " +
+  "buyers said and who it suits - for the 'should I buy this?' question a price chart alone does not answer. It " +
+  "is text, not a seller list, and not every product has one: an empty answer is Torob having no guide, so never " +
+  "compose a summary of your own in its place.",
   "Every search returns available_filters - the filter groups that search really accepts, with their " +
   "slugs and the values each takes. Pass those values back in filters, or use min_price_toman / " +
   "max_price_toman for a price window. Torob ignores a slug or value it does not know and answers " +
@@ -66,7 +70,27 @@ export const INSTRUCTIONS = [
   "web API only.",
 ].join(" ");
 
+/**
+ * Hand every store write this dispatch issued to the request's own context.
+ *
+ * Draining once, at the end of the call, is the point: an isolate serves
+ * requests concurrently, so a write made during call A can only be registered
+ * on a context that is known to be live at that moment. A context stored
+ * earlier and read later is exactly the shape that used to hand A's writes to
+ * B's (already finished) context, and drop them. An error path drains too - a
+ * call that remembered a product's name before failing is the write most worth
+ * keeping.
+ */
+function keepAliveWrites(ctx?: WaitUntil): void {
+  if (!ctx) return;
+  for (const promise of takePendingWrites()) ctx.waitUntil(promise);
+}
+
 export function buildServer(ctx?: WaitUntil): Server {
+  // Whether a store write can outlive this response is a fact about the runtime
+  // rather than about the call: a Worker is given an ExecutionContext, Node has
+  // nothing to hand a promise to.
+  setWaitUntilEnabled(Boolean(ctx));
   const server = new Server(
     { name: "torob-mcp", version: VERSION },
     { capabilities: { tools: {} }, instructions: INSTRUCTIONS }
@@ -92,9 +116,6 @@ export function buildServer(ctx?: WaitUntil): Server {
     }
     try {
       const args = (req.params.arguments || {}) as Record<string, unknown>;
-      // Anything a tool writes to the per-colo cache has to outlive this
-      // response, and in a Worker only `waitUntil` can promise that.
-      setWaitUntil(ctx ? (promise) => ctx.waitUntil(promise) : null);
       const data = await tool.run(args);
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     } catch (err) {
@@ -103,6 +124,10 @@ export function buildServer(ctx?: WaitUntil): Server {
           ? err.message
           : `Unexpected error: ${err instanceof Error ? err.message : String(err)}`;
       return { content: [{ type: "text", text: message }], isError: true };
+    } finally {
+      // Anything a tool wrote to the per-colo cache has to outlive this
+      // response, and in a Worker only `waitUntil` can promise that.
+      keepAliveWrites(ctx);
     }
   });
 

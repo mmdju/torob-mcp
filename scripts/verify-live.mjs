@@ -20,16 +20,30 @@ const bad = (label, extra = "") => {
   console.log(`  FAIL ${label}${extra ? ` - ${extra}` : ""}`);
 };
 
+// A 429 here is this service's own limit, not a wrong answer: the hosted copy
+// answers at most 20 /mcp calls a minute per client, and the caller's address
+// is shared (a GitHub runner's egress is, measured: three scheduled runs died
+// on `Error: HTTP 429` at the MCP handshake before this), so the budget can be
+// spent by a neighbour's traffic. The window the response names is waited out
+// instead, and only a limit that outlasts the wait fails the run.
 async function rpc(method, params, id) {
-  const headers = { "content-type": "application/json", accept: "application/json, text/event-stream" };
-  if (sessionId) headers["mcp-session-id"] = sessionId;
-  const res = await fetch(MCP, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) });
-  const sid = res.headers.get("mcp-session-id");
-  if (sid) sessionId = sid;
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const text = await res.text();
-  const line = text.split("\n").find((l) => l.startsWith("data:"));
-  return JSON.parse(line ? line.slice(5).trim() : text);
+  for (let attempt = 1; ; attempt++) {
+    const headers = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+    if (sessionId) headers["mcp-session-id"] = sessionId;
+    const res = await fetch(MCP, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) });
+    const sid = res.headers.get("mcp-session-id");
+    if (sid) sessionId = sid;
+    if (res.status === 429 && attempt <= 3) {
+      const waitSeconds = Math.min(75, Math.max(1, Number(res.headers.get("retry-after")) || 20));
+      console.log(`  ..  rate limited, waiting ${waitSeconds}s (attempt ${attempt} of 3)`);
+      await new Promise((r) => setTimeout(r, waitSeconds * 1000));
+      continue;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    const line = text.split("\n").find((l) => l.startsWith("data:"));
+    return JSON.parse(line ? line.slice(5).trim() : text);
+  }
 }
 
 async function call(name, args, id) {
@@ -96,6 +110,7 @@ const expected = [
   "list_locations",
   "price_history",
   "product_details",
+  "product_guide",
   "search_by_image",
   "search_products",
   "shop_profile",
@@ -139,9 +154,10 @@ try {
   groups ? ok("search filters", `${groups} groups: ${search.available_filters.slice(0, 4).map((f) => f.slug).join(", ")}`) : bad("search filters", "none reported");
   // The groups carry the values they take, and Torob's count travels with its
   // own caveat instead of being quoted as a fact.
-  const withOptions = (search.available_filters ?? []).find((f) => Array.isArray(f.options) && f.options.length);
+  const groupsWithValues = (search.available_filters ?? []).filter((f) => Array.isArray(f.options) && f.options.length);
+  const withOptions = groupsWithValues[0];
   withOptions
-    ? ok("filter values", `${withOptions.slug}: ${withOptions.options.length} option(s)`)
+    ? ok("filter values", `${groupsWithValues.length} group(s) carry values, e.g. ${withOptions.slug}: ${withOptions.options.length} option(s)`)
     : bad("filter values", "no group carries its values");
   search.total_matches_note ? ok("count is labelled approximate") : bad("count note", "total_matches_note missing");
   // The cheapest and dearest price Torob saw for this query ride along.
@@ -149,14 +165,47 @@ try {
   await pause();
 
   // A value the search itself advertised must round-trip through `filters`.
-  if (withOptions) {
-    const slug = withOptions.slug;
-    const value = withOptions.options[0].value;
+  // The brand group is the one exception, and deliberately so: a brand travels
+  // in upstream's own `brand` parameter (Torob filters on its id and ignores the
+  // slug), so `filters_applied` never names it - see tests/discovery.test.mjs.
+  // This check used to take whichever group came first with values, which on a
+  // phone search is brand, and so failed on every run that got this far.
+  const roundTrip = groupsWithValues.find((f) => f.slug !== "brand");
+  if (roundTrip) {
+    const slug = roundTrip.slug;
+    const value = roundTrip.options[0].value;
     const filtered = await call("search_products", { query: "گوشی ایفون ۱۳", filters: { [slug]: value }, limit: 3, sort: "expensive" }, id++);
     filtered.filters_applied?.[slug] === value
       ? ok("filter round-trip", `${slug}=${value}`)
       : bad("filter round-trip", `${slug}=${value} came back as ${JSON.stringify(filtered.filters_applied)}`);
     filtered.sort_meaning ? ok("sort meaning", filtered.sort_meaning) : bad("sort meaning", "sort_meaning missing");
+    await pause();
+  }
+
+  // The brand path has its own contract, and it is two-sided: the group's value
+  // (the brand id) narrows the search, and a wording that matches no brand this
+  // search offers is refused with the ones it does have - because Torob ignores
+  // an unknown brand, which would come back as an unfiltered list wearing a
+  // filtered answer.
+  const brandValue = (search.available_filters ?? []).find((f) => f.slug === "brand")?.options?.[0]?.value;
+  if (brandValue) {
+    const byBrand = await call("search_products", { query: "گوشی ایفون ۱۳", brand: brandValue, limit: 3 }, id++);
+    byBrand.total_matches <= search.total_matches
+      ? ok("brand path", `brand=${brandValue} narrowed ${search.total_matches} matches to ${byBrand.total_matches}`)
+      : bad("brand path", `brand=${brandValue} returned MORE matches than the unfiltered search (${byBrand.total_matches} vs ${search.total_matches})`);
+    await pause();
+    let refusal = null;
+    try {
+      await call("search_products", { query: "گوشی ایفون ۱۳", brand: "برند-ناموجود-۴۰۴" }, id++);
+    } catch (err) {
+      refusal = String(err.message);
+    }
+    refusal && /is not a brand this search offers/.test(refusal)
+      ? ok("brand refusal", "a wording no brand matches is refused instead of being sent and ignored")
+      : bad(
+          "brand refusal",
+          refusal ? `refused with unexpected wording: ${refusal.slice(0, 140)}` : "an unknown brand was accepted instead of refused"
+        );
     await pause();
   }
 
@@ -178,7 +227,10 @@ try {
     // The spec tables ride along in the same response. The cheapest card of a
     // broad search can be a bare accessory with none, so the check walks the
     // cards this run already holds until one carries a spec table.
-    let specRows = Array.isArray(details.specs) ? details.specs : null;
+    // An empty table is not a table: `[]` is truthy, so this check used to pass
+    // on a card whose specs had arrived empty - the same shape change it exists
+    // to catch, wearing the costume of a pass.
+    let specRows = Array.isArray(details.specs) && details.specs.length ? details.specs : null;
     for (const card of search.products.slice(1, 3)) {
       if (specRows) break;
       const extra = await call("product_details", { prk: card.prk, details_url: card.details_url, max_offers: 1 }, id++);
@@ -188,6 +240,41 @@ try {
     specRows
       ? ok("spec tables", `${specRows.length} spec row(s)`)
       : bad("spec tables", "no spec table on any of the first three cards - the shape may have changed");
+    await pause();
+
+    // Torob's own guide, read as text. Not every product has one, so the sweep
+    // walks the cards it already holds until one does; a phone search with no
+    // guide anywhere in the first three is the shape change, not an empty
+    // article. What comes back must be the article's content: markup reaching a
+    // caller is the failure this tool exists to prevent.
+    let guide = null;
+    for (const card of search.products.slice(0, 3)) {
+      const attempt = await call("product_guide", { prk: card.prk, details_url: card.details_url }, id++);
+      if (Array.isArray(attempt.sections) && attempt.sections.length) {
+        guide = attempt;
+        break;
+      }
+      await pause();
+    }
+    if (guide) {
+      const headings = guide.sections.filter((s) => typeof s.heading === "string" && s.heading).length;
+      guide.text_length > 0
+        ? ok("product_guide", `${guide.sections.length} section(s), ${headings} named by Torob, ${guide.text_length} character(s)`)
+        : bad("product_guide", "sections with no text in them");
+      headings ? ok("guide headings", "Torob's own section names travel with the text") : bad("guide headings", "no section carries a heading");
+      // The one shape this tool must never hand out: the HTML it was built from.
+      /<[a-z][^>]*>/i.test(JSON.stringify(guide.sections)) || /&#?[a-z0-9]+;/i.test(JSON.stringify(guide.sections))
+        ? bad("guide is text", "markup or an undecoded entity reached the caller")
+        : ok("guide is text", "no markup in the answer");
+      guide.truncated && !guide.note
+        ? bad("guide truncation", "truncated without a note saying so")
+        : ok("guide cap", guide.truncated ? `truncated at max_chars, ${guide.text_length} characters available` : "fits the default cap");
+      guide.guide_url === `https://torob.com/p/${guide.prk}/`
+        ? ok("guide url", guide.guide_url)
+        : bad("guide url", String(guide.guide_url ?? "missing"));
+    } else {
+      bad("product_guide", "no guide on any of the first three cards of a phone search - the endpoint or the shape may have changed");
+    }
     await pause();
 
     // The chart is Torob's own: monthly points plus the shop-level changes.

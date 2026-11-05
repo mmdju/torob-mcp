@@ -1,6 +1,6 @@
 # Tool reference
 
-Input/output reference for all **14 tools**. Types only - no internals. For conversation flows, see [examples/sample-calls.md](../examples/sample-calls.md). The response types are also kept in [card.d.ts](card.d.ts).
+Input/output reference for all **15 tools**. Types only - no internals. For conversation flows, see [examples/sample-calls.md](../examples/sample-calls.md). The response types are also kept in [card.d.ts](card.d.ts).
 
 Every tool is **read-only** and needs **no credentials**. Result lists are **capped** (default 10; the maximum is per tool and stated in its table - 24 on a product search, 15 on `find_best_value`, 24 on the shop and image lists, 30 on most others). All prices are in **Toman**.
 
@@ -33,7 +33,7 @@ Shared conventions:
 - `available: false` on a card or an offer is upstream's "not for sale right now".
 - **In-person prices are the shops' own and can be old.** Every in-person row carries `last_price_change_date` (Torob's wording, e.g. `"۸ ماه و ۹ روز پیش"`), so say how old a shelf price is instead of presenting it as today's.
 - **Torob's own labels travel as sent** - filter titles, series names (`"میانگین قیمت"`), shop notes, campaign names. Quote them rather than translating them into a claim.
-- **Bot challenge.** Torob answers a client that calls too often with HTTP 490 instead of data. It clears on its own after a stretch with no calls at all - measured anywhere from a few minutes to half an hour. A challenged call is worth retrying later, not immediately; the server holds the rest of a burst for the whole cooldown so it does not deepen the block, and says how many minutes are left.
+- **Bot challenge.** Torob answers a client that calls too often with HTTP 490 instead of data. It clears on its own after a stretch with no calls at all - measured anywhere from a few minutes to half an hour. A challenged call is worth retrying later, not immediately; the server holds the rest of a burst for the whole cooldown so it does not deepen the block, and says how many minutes are left. Note that some addresses are refused outright with nothing wrong at all, and no header or setting here changes that - see [SECURITY.md](SECURITY.md).
 
 ## `torob_suggest`
 
@@ -63,7 +63,7 @@ Search Torob, get **compact cards**: the cheapest offer in Toman, the shop behin
 | `filters` | object | Values from `available_filters` of the same query, e.g. `{"available": "1", "storage": "1 tb"}`. A value the search does not offer is refused with the real ones |
 | `limit` | number | How many cards (default 10, max 24 - upstream returns 24-26 rows a page whatever is asked) |
 
-Returns: `total_matches`, `total_matches_note`, `page`, `page_count` (how many cards **this page** held before `limit` trimmed it - not how many pages exist), `has_next_page`, `price_range_toman` (`{min, max}`), `price_bounds_toman`, `products[]`, `available_filters`, `brand_values`, `filters_applied`, `sort_meaning`, `attribution`. `total_matches_note` is there because Torob's own count moves between identical requests - page with `has_next_page` instead of quoting the number.
+Returns: `total_matches`, `total_matches_note`, `page`, `page_count` (how many cards **this page** held before `limit` trimmed it - not how many pages exist), `has_next_page`, `price_range_toman` (`{min, max}`), `price_bounds_toman`, `products[]`, `available_filters`, `brand_values`, `filters_applied`, `sort_meaning`, `attribution`. `total_matches_note` is there because Torob's own count moves between identical requests - page with `has_next_page` instead of quoting the number. When Torob's filter shape is one this server cannot read, `available_filters` comes back empty with `available_filters_note` beside it saying so: the products are still a complete answer, and only the narrowing surface is missing.
 
 Each card: `prk`, `name_fa`, `name_en`, `price_toman`, `price_text`, `available`, `shop_name`, `image`, `image_count`, `badges[]`, `url`, `is_adv`, `details_url`.
 
@@ -121,19 +121,22 @@ Returns: the card fields, plus:
 | `offers[]` | The seller list, cheapest first |
 | `offers_truncated` / `offers_returned` | More offers exist than shown |
 
-Each offer: `shop_name`, `shop_city`, `shop_id`, `shop_score` (0-5 or null), `shop_votes`, `price_toman`, `price_text`, `was_price_text` (struck-through price when discounted), `available`, `price_unreliable` (Torob's own warning), `free_shipping`, `payment_on_delivery`, `same_day_delivery`, `url`, `is_adv`, `postage_text` / `postage_fee_toman`, `delivered_price_toman`, `guarantee` (`enabled` / `disabled`), `installment_providers[]`, `last_price_change_date`, `has_public_torob_profile`, `shop_score_percentile`.
+Each offer: `shop_name`, `shop_city`, `shop_id`, `shop_score` (0-5 or null), `shop_votes`, `price_toman`, `price_text`, `was_price_text` (struck-through price when discounted), `available`, `price_unreliable` (Torob's own warning), `free_shipping`, `payment_on_delivery`, `same_day_delivery`, `url` (the shop's page on torob.com), `buy_url` (Torob's own click-through, an `api.torob.com` redirect), `shop_note` (Torob's own sentence about the seller, when it sends one), `is_adv`, `postage_text` / `postage_fee_toman`, `delivered_price_toman`, `guarantee` (`enabled` / `disabled`), `installment_providers[]`, `last_price_change_date`, `has_public_torob_profile`, `shop_score_percentile`.
 
 - `postage_text` is Torob's own line ("هزینه ارسال رایگان" or a Toman amount); `postage_fee_toman` is that number parsed, `null` when postage is free or unstated, and `delivered_price_toman` is the price with it added.
 - `resolved_by: "name-search"` means the id was re-found through the product's name, not matched exactly - say so rather than presenting it as the same id.
 - `price_unreliable: true` is **Torob saying that price cannot be trusted**. Say so; do not present it as a bargain.
 - `shop_score` is `null` only when Torob sends no score. Torob sends a score for nearly every offer but almost never the vote count behind it, so `shop_votes` is often 0 even when `shop_score` is 5.
 - `shop_id` is what `shop_profile` takes next.
+- `url` is the shop's stable page on torob.com; `buy_url` is the link Torob's own buy button uses, an `api.torob.com` redirect with tracking and a session id on it. Give the user `url`, and reach for `buy_url` only when they are about to click through.
 
 ### The in-person shops
 
 `in_person_count` is how many shops Torob lists for this product in a physical store; `in_person_sellers[]` is the cheapest `max_in_person` of them, and `in_person_map_url` is Torob's own map for them when it sends one. `in_person_note` says it plainly: these prices are the shops' own and can be old. When the list is cut, `in_person_truncated` / `in_person_returned` / `in_person_truncated_note` say so.
 
-Each row: `shop_name`, `shop_id`, `city`, `address`, `note` (the shop's own line, e.g. "تست و تحویل در حضور مشتری"), `price_toman`, `price_text`, `price_unreliable`, `is_open` (Torob's current state), `hours_status` / `hours_today` (its own words, e.g. `"بسته"` and `"تا ۰۹:۰۰ امروز"`), `last_price_change_date`, `fast_delivery`, `location` (`{lat, lon}`), `url` (the shop's torob.com page).
+Each row: `shop_name`, `shop_id`, `city`, `address`, `note` (the shop's own line, e.g. "تست و تحویل در حضور مشتری"), `price_toman`, `price_text`, `price_unreliable`, `is_open` (Torob's current state), `hours_status` / `hours_today` (its own words, e.g. `"بسته"` and `"تا ۰۹:۰۰ امروز"`), `last_price_change_date`, `fast_delivery`, `score` / `score_note` (Torob's own grade for that shop in this list - the badge the site shows - and its line under it), `url` (the shop's torob.com page).
+
+There is deliberately no coordinate here: measured on a live product, none of the 84 in-person rows carried one. The coordinates live behind the map endpoint, whose link this server hands out as `in_person_map_url`.
 
 ### Specs, variants, category path, purchase options
 
@@ -144,6 +147,31 @@ All of it rides along in the same response, so none of it costs an extra request
 - `category_path[]` - the categories above the product, without Torob's own root crumb.
 - `purchase_options[]` - Torob's quick purchase filters (guarantee, TorobPay credit), each with its own wording and `{price_from_text, online_sellers, offline_sellers}`.
 - `is_authentic` / `has_wiki` - Torob's own flips, present only when true. An absent `is_authentic` is **not** a claim that a product is fake.
+
+## `product_guide`
+
+Torob's own write-up of one product: what the model is, its strengths and weaknesses, what buyers said and who it suits - the article the site shows on the product page above the specs. This is the "should I buy this?" reading when a price chart alone does not answer it. It is text, not a seller list.
+
+| Param | Type | Required | Notes |
+|---|---|---|---|
+| `prk` | string | **yes** | From a `search_products` card, or a torob.com product URL |
+| `details_url` | string | no | The `details_url` from the same card, so the id resolves with no lookup |
+| `max_chars` | number | no | How much text to return (default 4000, max 8000) |
+
+Returns:
+
+| Field | Notes |
+|---|---|
+| `prk` | The product the guide is about |
+| `title` | The name the guide titles it with |
+| `sections[]` | `{heading, text}` - Torob's own headings (`نقاط قوت`, `نقاط ضعف`, `نظر خریداران`, `منابع` …), with `heading: null` for text before the first one |
+| `text_length` | How many characters the whole guide holds, before the cap |
+| `truncated` + `note` | The answer carries only the first part of the guide; raise `max_chars` for the rest |
+| `guide_url` | The product page, where the guide is rendered |
+
+- The headings and the wording are Torob's own: quote them rather than paraphrasing a verdict into your own words.
+- Not every product has a guide. An empty `sections[]` is Torob having nothing to say about this product, not a failure - and not an invitation to write a summary instead. `product_details` still answers about its price and sellers.
+- No markup is returned: the HTML is turned into headings and text, with entities decoded.
 
 ## `price_history`
 

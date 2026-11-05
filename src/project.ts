@@ -16,9 +16,9 @@
 //    "فروشنده‌ها"). That list is the reason a Torob MCP exists at all, so it
 //    gets a first-class shape rather than being flattened into a string.
 
-import { ATTRIBUTION, MIN_SHOP_VOTES, SORT_PARAMS, SOURCE, TOROB_API, TTL, type Sort } from "./config.js";
+import { ATTRIBUTION, MIN_SHOP_VOTES, SORT_PARAMS, SOURCE, TTL, type Sort } from "./config.js";
 import { cacheSet as cachePut, cached, cachedGet } from "./cache.js";
-import { UpstreamError, torobGet } from "./http.js";
+import { torobGet, upstreamBaseUrl, UpstreamError } from "./http.js";
 import { storeGet, storeSet } from "./store.js";
 import {
   availableFrom,
@@ -51,7 +51,16 @@ export interface Offer {
   free_shipping: boolean | null;
   payment_on_delivery: boolean | null;
   same_day_delivery: string | null;
+  /** The shop's page on torob.com, e.g. https://torob.com/shop/392309/. */
   url: string | null;
+  /**
+   * Torob's own click-through link (the site's "خرید اینترنتی" button). It is an
+   * api.torob.com redirect carrying tracking parameters and a session id, so it
+   * is kept apart from `url` instead of being handed over as the shop's address.
+   */
+  buy_url: string | null;
+  /** Torob's own sentence about this seller, when it sent one. */
+  shop_note: string | null;
   /** Torob's own ad flag for this offer. */
   is_adv: boolean;
   /** Torob's postage line as sent, e.g. "هزینه ارسال ۷۰٫۰۰۰ تومان". */
@@ -122,6 +131,8 @@ export interface ProductDetails extends ProductCard {
   purchase_options?: PurchaseOption[];
   is_authentic?: true;
   has_wiki?: true;
+  /** Torob's own reason for reporting availability differently than the price. */
+  availability_note?: string;
   attribution: string;
 }
 
@@ -163,6 +174,8 @@ interface RawProduct {
   price?: unknown;
   price_text?: unknown;
   stock_status?: unknown;
+  availability?: unknown;
+  is_accessible?: unknown;
   image_url?: unknown;
   image_count?: unknown;
   web_client_absolute_url?: unknown;
@@ -203,6 +216,13 @@ export interface RawSearch {
   filters1?: unknown[];
   filters2?: unknown[];
   attributes?: unknown[];
+  /**
+   * The modern name for the same list, sent beside the three above and empty on
+   * every live search measured (2026-10-09). Read as a fourth source so a
+   * rename upstream cannot quietly turn the whole filter surface into "this
+   * search takes no filters".
+   */
+  available_filters?: unknown[];
   spellcheck?: unknown;
   has_visible_result?: unknown;
 }
@@ -211,6 +231,24 @@ export interface RawSearch {
 
 // A shop score without votes behind it is noise. Reporting 5.0 from two votes
 // would make an agent recommend a shop it knows nothing about.
+// Torob's own grade for an in-person shop (measured live: 5, 4, 3) - the badge
+// the site shows beside the shop's name in its "فروشگاه‌های حضوری" list. It is a
+// trust grade from Torob and not the 0-5 shopper score an offer carries, which
+// is why it has its own reader instead of reusing shopScore.
+function trustGradeOf(score: unknown): number | null {
+  const s = num(score, NaN);
+  return Number.isFinite(s) && s > 0 ? Math.round(s * 10) / 10 : null;
+}
+
+// Torob's own sentence about a seller, when it sends one. The site shows it
+// under the shop's grade; `score_info.summary` is the readable half of it.
+function scoreNoteOf(raw: unknown): string | null {
+  const info = (raw as { score_info?: { score_text?: unknown; complaints_info?: { summary?: unknown } } } | null)?.score_info;
+  const summary = info?.complaints_info?.summary;
+  const first = Array.isArray(summary) ? summary[0] : summary;
+  return short(first ?? info?.score_text, 200);
+}
+
 function shopScore(score: unknown, votes: unknown): number | null {
   const v = Math.max(0, Math.round(num(votes, 0)));
   const s = num(score, 0);
@@ -272,6 +310,35 @@ function prkInUrl(url: string): string | null {
   }
 }
 
+// Torob's own verdict on availability when it sends a boolean, and the
+// price-derived guess otherwise. The search row carries `stock_status` (an empty
+// string on every row measured on 2026-10-09) while the product page carries
+// `availability` as a real boolean, so the boolean is what is trusted and the
+// price stays as the fallback rather than being thrown away.
+function availabilityOf(row: RawProduct, price: number | null): boolean {
+  return typeof row.availability === "boolean" ? row.availability : availableFrom(price);
+}
+
+// The product page's own word on whether this product can be bought, plus the
+// reason when it says no. A product Torob has taken out of reach must not be
+// handed to a caller as buyable because a stale price is still on it.
+function upstreamAvailabilityOf(raw: RawProduct): { available: boolean | null; note: string | null } {
+  if (raw.is_accessible === false) {
+    return {
+      available: false,
+      note:
+        "Torob marks this product as not accessible (withdrawn or hidden), so it is reported as out of " +
+        "stock whatever its price says.",
+    };
+  }
+  if (typeof raw.availability === "boolean") {
+    return raw.availability
+      ? { available: true, note: null }
+      : { available: false, note: "Torob reports this product as unavailable right now." };
+  }
+  return { available: null, note: null };
+}
+
 export function toCard(row: RawProduct): ProductCard | null {
   const prk = str(row.random_key).trim();
   if (!prk) return null;
@@ -282,7 +349,7 @@ export function toCard(row: RawProduct): ProductCard | null {
     name_en: short(row.name2, 160),
     price_toman: price,
     price_text: short(row.price_text, 80) ?? (price !== null ? `${formatToman(price)} تومان` : null),
-    available: availableFrom(price),
+    available: availabilityOf(row, price),
     shop_name: short((row as any).shop_text, 80),
     image: short(row.image_url, 300),
     image_count: Math.max(0, Math.round(num(row.image_count, 0))),
@@ -307,28 +374,46 @@ const DETAIL_URL_MEMORY = 500;
 // A Worker may finish a request before a floating promise settles, and a cache
 // write that was never awaited is exactly how the shared name used to go
 // missing: the entry survived only in the isolate that learned it. Anything
-// that has to outlive the response goes through here - the Worker hands over
-// its `waitUntil`, and Node simply lets the promise run.
+// that has to outlive the response therefore goes through here - the Worker
+// hands the promise to its `waitUntil`, and Node simply lets it run.
 export interface WaitUntil {
   waitUntil(promise: Promise<unknown>): void;
 }
 
-let keepAliveFn: ((promise: Promise<unknown>) => void) | null = null;
+// Whether this runtime can outlive a response at all. A Worker can (it is given
+// an ExecutionContext); Node cannot - and the answer never changes inside one
+// process, so it is set once when the server is built, not on every tool call.
+//
+// It is deliberately NOT a sink. Storing the current request's `waitUntil` here
+// was the obvious shape and it is wrong: an isolate serves requests
+// concurrently, so a second tool call overwrote the first's sink and the first
+// call's writes were handed to a context that could already be gone - silently
+// dropping the very memory this design leans on. What is stored instead is the
+// promises themselves. The dispatch drains the queue into *its own* context on
+// the way out, so a write issued during any call is registered on a context
+// that is live at the moment it is registered, whatever else is running at the
+// same time.
+let waitUntilEnabled = false;
 
-export function setWaitUntil(fn: ((promise: Promise<unknown>) => void) | null): void {
-  keepAliveFn = fn;
+export function setWaitUntilEnabled(value: boolean): void {
+  waitUntilEnabled = value;
+}
+
+const pendingWrites = new Set<Promise<unknown>>();
+
+/** Everything queued since the last drain, and nothing after it. */
+export function takePendingWrites(): Promise<unknown>[] {
+  const out = [...pendingWrites];
+  pendingWrites.clear();
+  return out;
 }
 
 function keepAlive(promise: Promise<unknown>): void {
-  if (!keepAliveFn) {
-    void promise;
-    return;
-  }
-  try {
-    keepAliveFn(promise);
-  } catch {
-    void promise;
-  }
+  // A rejected write must never become an unhandled rejection: this layer can
+  // only ever save or cost one extra upstream request.
+  const guarded = promise.catch(() => undefined);
+  if (!waitUntilEnabled) return;
+  pendingWrites.add(guarded);
 }
 
 function rememberResolved(prk: string, url: string, name: string | null): void {
@@ -387,10 +472,11 @@ function toOffer(raw: RawOffer): Offer | null {
   const postage = postageOf(raw);
   const guarantee = short((raw.guarantee_info as { status?: unknown } | null | undefined)?.status, 20);
   const percentile = num(raw.shop_score_percentile, NaN);
+  const shopId = str(raw.shop_id).trim();
   return {
     shop_name: shop,
     shop_city: short(raw.shop_name2, 60),
-    shop_id: str(raw.shop_id).trim() || null,
+    shop_id: shopId || null,
     shop_score: shopScore(raw.shop_score, raw.shop_votes_count),
     shop_votes: Math.max(0, Math.round(num(raw.shop_votes_count, 0))),
     price_toman: price,
@@ -401,7 +487,13 @@ function toOffer(raw: RawOffer): Offer | null {
     free_shipping: more.free_shipping === undefined ? null : more.free_shipping === true,
     payment_on_delivery: more.payment_on_delivery === undefined ? null : more.payment_on_delivery === true,
     same_day_delivery: short(more.same_day_delivery, 120),
-    url: str(raw.page_url).startsWith("http") ? str(raw.page_url) : null,
+    // A stable, human address: the shop on torob.com. The link Torob's own buy
+    // button uses is an api.torob.com redirect with ~400 characters of tracking
+    // around its session id, so it travels as `buy_url` and never as the shop's
+    // address.
+    url: shopId ? `https://torob.com/shop/${shopId}/` : (str(raw.page_url).startsWith("http") ? str(raw.page_url) : null),
+    buy_url: str(raw.page_url).startsWith("http") ? str(raw.page_url) : null,
+    shop_note: scoreNoteOf(raw),
     is_adv: raw.is_adv === true,
     postage_text: postage.text,
     postage_fee_toman: postage.fee,
@@ -464,16 +556,16 @@ export interface InPersonSeller {
    */
   last_price_change_date: string | null;
   fast_delivery: boolean;
-  location: { lat: number; lon: number } | null;
+  /**
+   * Torob's own grade for this shop in the in-person list (measured live: 5, 4,
+   * 3 on one product) - the badge the site shows beside the shop's name. It is
+   * Torob's trust grade, not the 0-5 shopper score an offer carries.
+   */
+  score: number | null;
+  /** Torob's own line for that grade, e.g. "خرید حضوری". */
+  score_note: string | null;
   /** The shop's page on torob.com, where its details live. */
   url: string;
-}
-
-function locationOf(raw: any): { lat: number; lon: number } | null {
-  const lat = num(raw?.lat, NaN);
-  const lon = num(raw?.lon, NaN);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  return { lat, lon };
 }
 
 function toInPersonSeller(raw: any): InPersonSeller | null {
@@ -495,7 +587,12 @@ function toInPersonSeller(raw: any): InPersonSeller | null {
     hours_status: short(raw?.working_hours?.title?.status, 20),
     last_price_change_date: short(raw?.last_price_change_date, 60),
     fast_delivery: raw?.supports_fast_delivery === true,
-    location: locationOf(raw?.location),
+    // No coordinates here: measured on a live product, none of the 84 in-person
+    // rows carried a `location` at all - the coordinates live behind the map
+    // endpoint, whose link this projection hands out as `in_person_map_url`.
+    // The old field promised lat/lon and was always null, so it is gone.
+    score: trustGradeOf(raw?.score_info?.score),
+    score_note: scoreNoteOf(raw),
     url: shopId
       ? `https://torob.com/shop/${shopId}/`
       : `https://torob.com/p/${str(raw?.prk).trim()}/`,
@@ -737,6 +834,13 @@ export interface SearchResult {
   suggested_categories: { id: string; title: string }[];
   /** Every filter group this search accepts, with its slug. */
   available_filters: FilterGroup[];
+  /**
+   * Set when the groups above could not be read. The products are still a
+   * complete answer - only the narrowing surface is missing, and saying so is
+   * the difference between "this search takes no filters" and "this server and
+   * Torob disagree about the shape".
+   */
+  available_filters_note?: string;
   spellcheck: { corrected: string | null; original: string } | null;
   attribution: string;
 }
@@ -809,7 +913,7 @@ function brandOf(item: unknown): { value: string; slug: string } {
 }
 
 function filterGroupsOf(raw: RawSearch): FilterGroup[] {
-  const out: FilterGroup[] = [];
+  const out = new Map<string, FilterGroup>();
   const brief = (g: any) => {
     const slug = str(g?.slug).trim();
     if (!slug) return null;
@@ -839,12 +943,70 @@ function filterGroupsOf(raw: RawSearch): FilterGroup[] {
       ...(str(g?.url) ? { values_url: str(g.url) } : {}),
     } satisfies FilterGroup;
   };
-  for (const group of [...(raw.filters1 ?? []), ...(raw.filters2 ?? []), ...(raw.attributes ?? [])]) {
+  // Every source this response carries the groups in. Torob sends the same
+  // groups more than once - measured on a live search (2026-10-09): 18 groups
+  // arrived across these lists and only 12 of them were unique (brand, usage,
+  // type, bluetooth_version, shop_type and stock_status each came twice, byte
+  // for byte). One group per slug survives, so the caller is not handed the same
+  // list twice and an agent never has to guess which copy is authoritative.
+  const sources = [
+    ...(raw.filters1 ?? []),
+    ...(raw.filters2 ?? []),
+    ...(raw.attributes ?? []),
+    // Its modern name, already sent beside the others and empty today. Reading
+    // it means a rename upstream cannot quietly drop the whole filter surface.
+    ...(raw.available_filters ?? []),
+  ];
+  let rows = 0;
+  for (const group of sources) {
     if (!group || typeof group !== "object") continue;
+    rows += 1;
     const b = brief(group);
-    if (b) out.push(b);
+    if (!b) continue;
+    const kept = out.get(b.slug);
+    if (!kept) {
+      out.set(b.slug, b);
+      continue;
+    }
+    // The first copy keeps its place in the list; a later one only fills what
+    // the kept copy lacks (values, the group's own URL).
+    out.set(b.slug, {
+      ...kept,
+      title: kept.title || b.title,
+      type: kept.type === "unknown" ? b.type : kept.type,
+      values: Math.max(kept.values, b.values),
+      ...(b.options && !kept.options ? { options: b.options } : {}),
+      ...((kept.options_truncated || b.options_truncated) && (kept.options || b.options)
+        ? { options_truncated: true }
+        : {}),
+      ...(kept.values_url || b.values_url ? { values_url: kept.values_url ?? b.values_url } : {}),
+    });
   }
-  return out;
+  // Rows that exist and cannot be read are not "this search takes no filters".
+  // The same rule the location endpoints follow, for the same reason: an empty
+  // list reads as a real answer while a wrong field name is a bug.
+  //
+  // The second half of the check is the one that catches a *rename*. The first
+  // only fires while the four source arrays still exist; if upstream moves the
+  // groups onto a key this server does not read, `rows` stays 0 and an empty
+  // list would slip through as a real answer - which is exactly the failure
+  // this guard is here to prevent. A search that came back with products and
+  // advertises no filter surface at all is that case, since every live search
+  // measured carries at least the price group. An empty result set may
+  // legitimately carry nothing, so it is the products that make it an error.
+  const hadProducts = Array.isArray(raw.results) && raw.results.length > 0;
+  if (out.size === 0 && (rows > 0 || hadProducts)) {
+    const unreadable =
+      rows > 0
+        ? `${rows} filter group(s) this server could not read`
+        : "no filter surface at all, though the search returned products";
+    throw new UpstreamError(
+      `Torob answered this search with ${unreadable}. The API shape may have changed, so this is reported ` +
+        `instead of an empty filter list - "this search takes no filters" would be a different answer.`,
+      "http"
+    );
+  }
+  return [...out.values()];
 }
 
 // The filter keys a response says it accepts: each group's own slug, plus the
@@ -953,10 +1115,16 @@ export async function rememberedFilterGroups(key: string): Promise<FilterGroup[]
 export async function searchProducts(opts: SearchOptions): Promise<SearchResult> {
   const raw = await searchRaw(opts);
   const result = projectSearch(raw, opts);
-  rememberFilterGroups(
-    filterMemoryKey(opts.q, { category: opts.category, city: opts.city, shopType: opts.shopType }),
-    result.available_filters
-  );
+  // Only a surface that was actually read teaches the next call. An unreadable
+  // one is a disagreement with Torob rather than a fact about this query, and
+  // remembering it would bless an empty list for the next half hour - making
+  // the note above a one-off instead of the warning it is meant to be.
+  if (result.available_filters.length) {
+    rememberFilterGroups(
+      filterMemoryKey(opts.q, { category: opts.category, city: opts.city, shopType: opts.shopType }),
+      result.available_filters
+    );
+  }
   return result;
 }
 
@@ -1006,6 +1174,18 @@ function projectSearch(raw: RawSearch, opts: SearchOptions): SearchResult {
   const total = Math.max(0, Math.round(num(raw.count, 0)));
   const spell = raw.spellcheck as { corrected_query?: unknown; initial_query?: unknown } | undefined;
   const brands = brandValuesOf(raw);
+  // The filter surface is a report about one part of the payload, so a change
+  // upstream must not take the products down with it: they are already here,
+  // and they are what answered the question. The read is allowed to fail loudly
+  // *about itself* - the failure travels as available_filters_note beside an
+  // empty list, never as a dead search.
+  let availableFilters: FilterGroup[] = [];
+  let availableFiltersNote: string | null = null;
+  try {
+    availableFilters = filterGroupsOf(raw);
+  } catch (err) {
+    availableFiltersNote = err instanceof Error ? err.message : String(err);
+  }
 
   return {
     products,
@@ -1025,7 +1205,8 @@ function projectSearch(raw: RawSearch, opts: SearchOptions): SearchResult {
     // The filter groups and attributes this search would accept. Reporting
     // them is what lets an agent narrow down without a second discovery call,
     // and it is how a caller learns the real slugs before using `filters`.
-    available_filters: filterGroupsOf(raw),
+    available_filters: availableFilters,
+    ...(availableFiltersNote ? { available_filters_note: availableFiltersNote } : {}),
     spellcheck: spell
       ? {
           corrected: str(spell.corrected_query).trim() || null,
@@ -1052,7 +1233,19 @@ async function detailsRaw(moreInfoUrl: string, prk: string, store = true): Promi
     if (remembered) return remembered;
     return torobGet<RawProduct>(moreInfoUrl);
   }
-  return cached(`d:${prk}`, TTL.product, () => torobGet<RawProduct>(moreInfoUrl));
+  // Filed under the id that was asked for, and only when the payload agrees
+  // with it. The id-only probe below already checks this, because it is the
+  // caller most likely to be answered by a different product; a caller-supplied
+  // details_url is the other one, and `prkInUrl` can only compare when the URL
+  // happens to carry the id in it. A payload that names another product is
+  // still the answer to this call - the page really was opened - but it is
+  // never filed here, so it can never be served later as this product.
+  return cached(`d:${prk}`, TTL.product, () => torobGet<RawProduct>(moreInfoUrl), {
+    accept: (raw) => {
+      const answered = str(raw?.random_key).trim();
+      return !answered || answered === prk;
+    },
+  });
 }
 
 // A product id on its own is NOT a search term, and this was measured: feeding
@@ -1204,9 +1397,12 @@ interface ResolvedProduct {
   raw?: RawProduct;
 }
 
-/** The details URL for an id, built from the id alone. */
+// The details URL for an id, built from the id alone. It is built on the same
+// base the calls go out on (http.ts), so a deployment pointed at a relay hands
+// out relay URLs - a caller passing api.torob.com's own URL back would leave the
+// relay and meet the challenge the relay exists to avoid.
 function prkOnlyDetailsUrl(prk: string): string {
-  return `${TOROB_API}/v4/base-product/details/?prk=${encodeURIComponent(prk)}`;
+  return `${upstreamBaseUrl()}/v4/base-product/details/?prk=${encodeURIComponent(prk)}`;
 }
 
 // A product id is only half an address upstream: the details endpoint also wants
@@ -1331,6 +1527,11 @@ export async function productDetails(
   if (!base) {
     throw new UpstreamError("Torob returned a product page with no product in it.", "http");
   }
+  // The product page's own verdict on availability, which is a real boolean
+  // here (measured: `availability: true` at the top level of the payload), and
+  // the reason when it says no. The price-derived guess on the card is what
+  // falls back when Torob stays silent.
+  const upstreamAvailability = upstreamAvailabilityOf(raw);
 
   const prices = offers.filter((o) => o.available && o.price_toman !== null).map((o) => o.price_toman as number);
   // "Best rated" is the highest score, not the first scored offer in a list
@@ -1369,6 +1570,8 @@ export async function productDetails(
 
   return {
     ...base,
+    ...(upstreamAvailability.available === null ? {} : { available: upstreamAvailability.available }),
+    ...(upstreamAvailability.note ? { availability_note: upstreamAvailability.note } : {}),
     offers,
     offer_count: offers.length,
     price_spread_toman: prices.length > 1 ? Math.max(...prices) - Math.min(...prices) : null,
@@ -2013,17 +2216,34 @@ function assertReadable(list: unknown[], raw: { results?: unknown }, what: strin
 }
 
 export async function provinces(): Promise<Province[]> {
-  const raw = (await cached("prov", TTL.locations, () =>
-    torobGet<any>("/v4/province/list/?size=200")
-  )) as { results?: unknown };
-  const out: Province[] = [];
-  for (const p of Array.isArray(raw?.results) ? raw.results : []) {
-    const id = str(p?.id ?? p?.province_id).trim();
-    const name = nameOf(p);
-    if (id && name) out.push({ id, name });
-  }
-  assertReadable(out, raw, "province list");
-  return out;
+  // Read and checked inside the cached fetch, on purpose: the cache stores
+  // whatever the fetcher returns, so an unreadable payload is the one shape
+  // that must not be allowed through. Filing an empty province list under a
+  // day-long key would answer "Iran has no provinces" long after upstream had
+  // fixed itself.
+  return cached("prov", TTL.locations, async () => {
+    const raw = (await torobGet<any>("/v4/province/list/?size=200")) as { results?: unknown };
+    const out: Province[] = [];
+    for (const p of Array.isArray(raw?.results) ? raw.results : []) {
+      const id = str(p?.id ?? p?.province_id).trim();
+      const name = nameOf(p);
+      if (id && name) out.push({ id, name });
+    }
+    assertReadable(out, raw, "province list");
+    // The rows-exist check above cannot see a *rename*: it re-reads the same
+    // `results` key, so a renamed container reads as "no rows" and that check
+    // never fires. Iran always has 31 provinces, so an empty list cannot be an
+    // answer - it is this server and Torob disagreeing about the shape, and it
+    // has to be said out loud rather than reported as an empty country.
+    if (out.length === 0) {
+      throw new UpstreamError(
+        `Torob answered the province list with no provinces this server could read (it always has 31). ` +
+          `The API shape may have changed, so this is reported instead of an empty list.`,
+        "http"
+      );
+    }
+    return out;
+  });
 }
 
 export async function cities(provinceId?: string, search?: string): Promise<City[]> {
@@ -2031,18 +2251,22 @@ export async function cities(provinceId?: string, search?: string): Promise<City
   if (provinceId) params.set("province", provinceId);
   if (search) params.set("search", search);
   const key = `city:${provinceId ?? ""}:${search ?? ""}`;
-  const raw = (await cached(key, TTL.locations, () =>
-    torobGet<any>(`/v4/city/list/?${params.toString()}`)
-  )) as { results?: unknown };
-  const out: City[] = [];
-  for (const c of Array.isArray(raw?.results) ? raw.results : []) {
-    const id = str(c?.id ?? c?.city_id).trim();
-    const name = nameOf(c);
-    if (!id || !name) continue;
-    out.push({ id, name, province_id: str(c?.province_id ?? c?.province) || null });
-  }
-  assertReadable(out, raw, "city list");
-  return out;
+  // Read inside the cached fetch for the same reason as the province list: a
+  // payload this server cannot read must not be the thing the cache remembers.
+  // (An empty city list, unlike an empty province list, is a real answer - a
+  // name that matches nothing - so only the unreadable case is refused here.)
+  return cached(key, TTL.locations, async () => {
+    const raw = (await torobGet<any>(`/v4/city/list/?${params.toString()}`)) as { results?: unknown };
+    const out: City[] = [];
+    for (const c of Array.isArray(raw?.results) ? raw.results : []) {
+      const id = str(c?.id ?? c?.city_id).trim();
+      const name = nameOf(c);
+      if (!id || !name) continue;
+      out.push({ id, name, province_id: str(c?.province_id ?? c?.province) || null });
+    }
+    assertReadable(out, raw, "city list");
+    return out;
+  });
 }
 
 // -------------------------------------------------------------------- offers
@@ -2110,4 +2334,144 @@ export async function suggestTerms(q: string): Promise<{ query: string; suggesti
     }
   }
   return { query: q, suggestions: [...new Set(out)].slice(0, 10), dropped };
+}
+
+// ------------------------------------------------------------------- guide
+
+/**
+ * Torob's own guide for a product ("راهنمای جامع محصول"), the article the site
+ * shows above the specs: an introduction to the model, its strengths and
+ * weaknesses, what buyers said and who the product suits. Verified live on
+ * 2026-10-09: `/v4/base-product/wiki/` answered 200 with 9.2KB of HTML for a
+ * product whose details payload said only `has_wiki: true`.
+ */
+export interface GuideSection {
+  /** Torob's own heading, e.g. "نقاط قوت"; null for text before the first one. */
+  heading: string | null;
+  text: string;
+}
+
+export interface ProductGuide {
+  prk: string;
+  /** The product's name as the guide titles it. */
+  title: string | null;
+  sections: GuideSection[];
+  /** How many characters the whole guide holds, before the requested cap. */
+  text_length: number;
+  truncated: boolean;
+  /** The product page, where this guide is rendered. */
+  guide_url: string;
+  attribution: string;
+}
+
+// The guide is an article, not a record: a caller may ask for all of it, and the
+// default keeps a product's pros and cons inside the kind of context budget the
+// rest of the server respects. The numbers themselves live in tools.ts, next to
+// the schema that advertises them (tests/agent-surface.test.mjs compares the two).
+// h1 is the product's name - the same string the payload carries as `name1` -
+// so it is read as a title and stripped out, while h2-h4 are the article's own
+// sections (measured live: معرفی محصول، مشخصات، نقاط قوت، نقاط ضعف …).
+const GUIDE_HEADING_RE = /<(h[2-4])[^>]*>([\s\S]*?)<\/\1>/gi;
+const GUIDE_H1_RE = /<h1[^>]*>([\s\S]*?)<\/h1>/i;
+
+// A small, deliberately narrow HTML reader: no dependency, and it never returns
+// markup to a caller. The guide is generated HTML with headings, paragraphs,
+// lists and the occasional admonition box, so the conversion is "headings become
+// sections, everything else becomes text".
+const HTML_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+  // The joiners are written by code point: a literal one is invisible in an
+  // editor and does not survive a copy.
+  zwnj: String.fromCharCode(0x200c),
+  zwj: String.fromCharCode(0x200d),
+  "#39": "'",
+  "#x27": "'",
+};
+
+function plainText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|tr|h[1-6]|blockquote)>/gi, "\n")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&([a-z0-9#x]+);/gi, (m, name: string) => HTML_ENTITIES[name.toLowerCase()] ?? m)
+    .replace(/[ \t\u00a0]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function capText(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, Math.max(1, n - 3)).trimEnd()}...` : s;
+}
+
+/**
+ * Project Torob's guide into headings and text. Markup never reaches the caller:
+ * the answer is the article's content, not its HTML.
+ */
+export function guideOf(raw: unknown): { title: string | null; sections: GuideSection[]; text_length: number } {
+  const json = (raw ?? {}) as { data_html?: unknown; name1?: unknown };
+  const html = str(json.data_html);
+  const h1 = short(plainText(str(html.match(GUIDE_H1_RE)?.[1])), 160);
+  const title = short(json.name1, 160) ?? h1;
+  if (!html) return { title, sections: [], text_length: 0 };
+  const body = html.replace(/<h1[^>]*>[\s\S]*?<\/h1>/gi, "");
+  const found = [...body.matchAll(GUIDE_HEADING_RE)];
+  const sections: GuideSection[] = [];
+  const before = plainText(found.length ? body.slice(0, found[0].index ?? 0) : body);
+  if (before) sections.push({ heading: null, text: before });
+  for (let i = 0; i < found.length; i++) {
+    const heading = short(plainText(str(found[i][2])), 120);
+    const from = (found[i].index ?? 0) + found[i][0].length;
+    const to = i + 1 < found.length ? found[i + 1].index ?? body.length : body.length;
+    const text = plainText(body.slice(from, to));
+    if (!heading && !text) continue;
+    sections.push({ heading, text });
+  }
+  const text_length = sections.reduce((n, s) => n + s.text.length, 0);
+  return { title, sections, text_length };
+}
+
+/**
+ * The guide for one product, in text. The id goes through the same ladder every
+ * other product call uses (`confirmedPrk`), so a prk plus the card's
+ * `details_url` opens it with no server-side memory involved.
+ */
+export async function productGuide(
+  prkInput: string,
+  maxChars: number,
+  opts?: ProductDetailsOptions
+): Promise<ProductGuide> {
+  const prk = await confirmedPrk(prkInput, opts);
+  const raw = await cached(`gd:${prk}`, TTL.guide, () =>
+    torobGet<unknown>(`/v4/base-product/wiki/?prk=${encodeURIComponent(prk)}`)
+  );
+  const { title, sections, text_length } = guideOf(raw);
+  const cap = Math.min(Math.max(1, maxChars), 8000);
+  const out: GuideSection[] = [];
+  let used = 0;
+  let truncated = false;
+  for (const section of sections) {
+    if (used >= cap) {
+      truncated = true;
+      break;
+    }
+    const text = capText(section.text, cap - used);
+    used += text.length;
+    if (text.length < section.text.length) truncated = true;
+    out.push({ heading: section.heading, text });
+  }
+  return {
+    prk,
+    title,
+    sections: out,
+    text_length,
+    truncated,
+    guide_url: `https://torob.com/p/${prk}/`,
+    attribution: ATTRIBUTION,
+  };
 }
