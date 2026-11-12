@@ -240,4 +240,3 @@ button in the user's logged-in browser; `favorites_url` links to the list.
 Alternatively open the chosen shop's `buy_url` links, verify the listings,
 and add them to that merchant's cart. The MCP itself does not write favorites,
 authenticate, create carts, place orders or pay.
-
