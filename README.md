@@ -89,6 +89,11 @@ One line - the first run is slower because npm builds it, and `git` must be inst
 
 Or from a clone, if you would rather run code you can read:
 
+Local HTTP mode (`node dist/index.js --http`) listens on `127.0.0.1` only.
+Browser clients must be explicitly allowed through `TOROB_ALLOWED_ORIGINS`
+(for example `http://localhost:6274` for a local Inspector). Stdio needs no
+extra configuration. See [Security](SECURITY.md#cors).
+
 ```bash
 git clone https://github.com/mmdju/torob-mcp.git
 cd torob-mcp && npm install      # the prepare script builds dist/

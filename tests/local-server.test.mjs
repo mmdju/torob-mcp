@@ -12,6 +12,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
+import { request as httpRequest } from "node:http";
 import { VERSION } from "../dist/server.js";
 
 let dir;
@@ -128,7 +129,7 @@ test("node dist/index.js --http answers GET and HEAD /mcp the way the Worker doe
   // hosted plan.
   const port = await freePort();
   const child = spawn(process.execPath, ["dist/index.js", "--http"], {
-    env: { ...process.env, TOROB_MCP_HOME: join(dir, "home-http"), PORT: String(port) },
+    env: { ...process.env, TOROB_MCP_HOME: join(dir, "home-http"), PORT: String(port), TOROB_ALLOWED_ORIGINS: "http://localhost:6274" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stderr = "";
@@ -164,6 +165,26 @@ test("node dist/index.js --http answers GET and HEAD /mcp the way the Worker doe
     assert.match(page.headers.get("content-type") ?? "", /text\/html/);
 
     assert.equal((await fetch(`${base}/`)).status, 200, "and the landing page still answers");
+    const foreign = await fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: { origin: "https://attacker.example", "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(foreign.status, 403, "a foreign browser origin cannot drive the local server");
+    assert.equal(foreign.headers.get("access-control-allow-origin"), null);
+    const preflight = await fetch(`${base}/mcp`, { method: "OPTIONS", headers: { origin: "http://localhost:6274" } });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get("access-control-allow-origin"), "http://localhost:6274");
+    assert.equal(preflight.headers.get("vary"), "Origin");
+    const spoofed = await new Promise((resolve, reject) => {
+      const req = httpRequest(`${base}/mcp`, { method: "POST", headers: { host: "attacker.example" } }, (res) => {
+        res.resume();
+        res.on("end", () => resolve(res.statusCode));
+      });
+      req.on("error", reject);
+      req.end("{}");
+    });
+    assert.equal(spoofed, 403, "a foreign Host is refused even without Origin");
     // The tools are not touched: this is the transport, not the tools.
   } finally {
     child.kill();
