@@ -18,6 +18,8 @@ export const VERSION = "0.5.9";
 export const INSTRUCTIONS = [
   "Torob (Iran's price-comparison engine) price intelligence. Read-only, no API key needed.",
   "All prices are in Toman.",
+  "Use compare_shopping_list after selecting exact products to find shops carrying most or all items. " +
+  "It ranks item coverage before subtotal, excludes uncertain offers, and does not include shipping or change favorites, carts or orders.",
   "Pick the entry point: torob_suggest when the wording is vague, search_products to browse, " +
   "product_details for one product's seller list and the shops selling it in person, price_history for whether " +
   "now is a good time to buy, similar_products for 'what else is like this', " +

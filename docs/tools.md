@@ -1,6 +1,6 @@
 # Tool reference
 
-Input/output reference for all **15 tools**. Types only - no internals. For conversation flows, see [examples/sample-calls.md](../examples/sample-calls.md). The response types are also kept in [card.d.ts](card.d.ts).
+Input/output reference for all **16 tools**. Types only - no internals. For conversation flows, see [examples/sample-calls.md](../examples/sample-calls.md). The response types are also kept in [card.d.ts](card.d.ts).
 
 Every tool is **read-only** and needs **no credentials**. Result lists are **capped** (default 10; the maximum is per tool and stated in its table - 24 on a product search, 15 on `find_best_value`, 24 on the shop and image lists, 30 on most others). All prices are in **Toman**.
 
@@ -353,3 +353,39 @@ The deals Torob is currently featuring. **This is merchandising, not shop data**
 | `limit` | number | no | How many (default 10, max 30) |
 
 Returns `count` and `offers[]`: `group` (the campaign the banner belongs to), `title`, `description`, `image`, `url`. Refreshed every ten minutes.
+
+
+## compare_shopping_list
+
+Compare shops for a selected shopping list. This tool is read-only and reuses
+product details; it never searches by name or substitutes a similar product.
+
+| Parameter | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `items` | array | yes | 1-10 distinct exact products |
+| `items[].prk` | string | yes | UUID from a search card |
+| `items[].details_url` | string | yes | Matching HTTPS Torob details URL from that card |
+| `items[].quantity` | integer | no | 1-100, default 1 |
+| `limit` | number | no | Shops per page, default 3, maximum 5 |
+| `page` | number | no | 1-based shop page, maximum 50 |
+
+Each product takes at most one details fetch (or a cache hit). All items are
+validated before any fetch. Duplicate ids must be combined into one quantity.
+The entire seller list is compared before paginating shops. Within each shop,
+only its cheapest eligible offer per item counts. A known available stock flag,
+a positive safe-integer price, a numeric shop id and no unreliable-price warning
+are required. `excluded_offers` includes duplicate offers discarded in that step.
+
+Output: `items` with per-product status and eligible-shop count; `shops` with
+`covered_items`, `complete`, `subtotal_toman`, `missing_prks` and quantity-adjusted
+`lines`; `shop_count`, `page`, `has_next_page`, and `comparison_complete` (false
+when any lookup failed). Coverage ranks before subtotal; partial-basket subtotals
+must never be compared as though they included missing products. Monetary values
+are Toman, excluding shipping. `availability_confirmed` on seller offers records
+whether Torob stated stock explicitly; `listing_title` helps check the variant.
+
+This is not inventory reservation or checkout validation. Quantities, price age,
+listing variants, warranty, shipping and final totals still need checking at the
+merchant. Use returned product links to favorite through the logged-in browser,
+or the selected shop's buy links for cart entry. `favorites_url` opens Torob's
+favorites page; no account writes or order placement happen in this tool.

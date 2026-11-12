@@ -3,7 +3,7 @@
 ![Torob MCP banner](assets/torob-mcp.png)
 
 [![Live verify](https://github.com/mmdju/torob-mcp/actions/workflows/verify.yml/badge.svg)](https://github.com/mmdju/torob-mcp/actions/workflows/verify.yml)
-![15 tools](https://img.shields.io/badge/tools-15-blue)
+![16 tools](https://img.shields.io/badge/tools-16-blue)
 ![read-only](https://img.shields.io/badge/access-read--only-brightgreen)
 ![no API key](https://img.shields.io/badge/API%20key-not%20needed-lightgrey)
 ![MIT](https://img.shields.io/badge/license-MIT-yellow.svg)
@@ -75,7 +75,7 @@ Agents running in a browser work too - the endpoint answers CORS preflights (`OP
 
 ### Or run it on your own machine
 
-The same fifteen tools as a **local process** - no endpoint of ours, no rate limit of ours. What a run learns goes in `~/.torob-mcp/state.json`: the product names and links it found, and the wall it is waiting out. A restart keeps both; deleting that file starts you over.
+The same sixteen tools as a **local process** - no endpoint of ours, no rate limit of ours. What a run learns goes in `~/.torob-mcp/state.json`: the product names and links it found, and the wall it is waiting out. A restart keeps both; deleting that file starts you over.
 
 One line - the first run is slower because npm builds it, and `git` must be installed, since one dependency (`fa-text-utils`) is fetched from a git repository:
 
@@ -102,7 +102,7 @@ cd torob-mcp && npm install      # the prepare script builds dist/
 }
 ```
 
-## 15 tools, grouped by the question
+## 16 tools, grouped by the question
 
 **Find it**
 
@@ -160,6 +160,24 @@ Every tool is read-only (`readOnlyHint: true`) and needs no credentials. Nothing
 - Results are **capped** (default 10, each tool's own maximum in [docs/tools.md](docs/tools.md)) to protect agent context, and Persian wording is folded (Arabic yeh/kaf, mixed digits, ZWNJ) when names are compared - the query reaches Torob exactly as typed.
 - **[examples/sample-calls.md](examples/sample-calls.md)** has eleven copy-paste flows, **[docs/tools.md](docs/tools.md)** every parameter and filter slug, and **[docs/card.d.ts](docs/card.d.ts)** the response types.
 
+## Compare a shopping list
+
+After searching and confirming the exact model, size and variant for each item,
+call `compare_shopping_list` with each card's `prk`, matching `details_url`, and
+optional `quantity`. It checks all seller rows and ranks shops by distinct-item
+coverage, then subtotal. Pages default to 3 shops (maximum 5); the list accepts
+1-10 distinct products and quantities of 1-100.
+
+Unavailable, unknown-stock, unreliable and unpriced offers are excluded. Shipping
+is not included and a listed product does not prove the requested quantity is in
+stock. Errors stay visible and never make an incomplete basket look complete.
+
+Open the returned product URLs to add favorites in your logged-in Torob browser,
+or use a selected shop's `buy_url` links to add the exact listings to its cart.
+The tool returns a favorites-page link for convenience; it does not favorite,
+change carts, log in, place orders or pay. Check variants, warranty, stock,
+shipping and the final total on the merchant's website.
+
 ## How it works
 
 How a question becomes an answer. No user data is stored anywhere in this path.
@@ -181,7 +199,7 @@ flowchart LR
 ```
 
 - **Stateless.** Every request stands alone - no sessions, no accounts, nothing to log in to.
-- **Read-only.** All 15 tools carry `readOnlyHint`. Nothing can change, delete or order anything.
+- **Read-only.** All 16 tools carry `readOnlyHint`. Nothing can change, delete or order anything.
 - **Projected, not passed through.** A Torob search page is roughly 70KB of ranking metadata and experiment plumbing; every tool returns a compact record instead, with the seller list as a first-class `offers[]` array.
 - **No user data.** What the server does keep: a short-lived response cache and a small map of product ids it handed out.
 - **Rate-aware by necessity.** Upstream calls run one at a time with a 1.5s gap, and a challenge closes a gate the whole server shares instead of opening a retry storm.

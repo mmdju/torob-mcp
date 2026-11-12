@@ -8,6 +8,9 @@ export type Toman = number;
 
 /** One seller offer for a product. `products_info` upstream ("فروشنده‌ها"). */
 export interface Offer {
+  listing_title: string | null;
+  /** Whether Torob stated stock explicitly, rather than inferring it from price. */
+  availability_confirmed: boolean;
   shop_name: string;
   shop_city: string | null;
   shop_id: string | null;
@@ -53,6 +56,26 @@ export interface Offer {
   has_public_torob_profile: boolean | null;
   /** The shop's percentile on Torob, 0-100, when sent. */
   shop_score_percentile: number | null;
+}
+
+export interface ShoppingListComparison {
+  comparison_complete: boolean;
+  items: {
+    prk: string; url: string; quantity: number; status: "ok" | "error";
+    name?: string | null; eligible_shop_count?: number; excluded_offers?: number; error?: string | null;
+  }[];
+  shops: {
+    shop_id: string; shop_name: string; url: string;
+    covered_items: number; total_items: number; complete: boolean;
+    subtotal_toman: Toman; shipping_included: false; missing_prks: string[];
+    lines: {
+      prk: string; quantity: number; unit_price_toman: Toman; line_total_toman: Toman;
+      listing_title: string | null; buy_url: string | null;
+      shop_score: number | null; shop_votes: number; is_adv: boolean; price_updated: string | null;
+    }[];
+  }[];
+  shop_count: number; page: number; has_next_page: boolean;
+  favorites_url: string; note: string; attribution: string;
 }
 
 /** A product as it appears in search results: the cheapest offer only. */
