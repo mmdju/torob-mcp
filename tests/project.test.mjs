@@ -20,6 +20,18 @@ const searchRow = {
   more_info_url: "https://api.torob.com/v4/base-product/details/?search_id=abc&prk=2ee0949f",
 };
 
+test("seller projection never turns an arbitrary upstream URL into a buy link", () => {
+  const row = { products_info: { result: [{ shop_name: "shop", shop_id: "../user/logout", page_url: "https://attacker.example/" }] } };
+  const [offer] = offersOf(row);
+  assert.equal(offer.shop_id, null);
+  assert.equal(offer.url, null);
+  assert.equal(offer.buy_url, null);
+  const valid = "https://api.torob.com/v4/product-page/redirect/?prk=example&btn=buy";
+  const [known] = offersOf({ products_info: { result: [{ shop_name: "shop", shop_id: 7, page_url: valid }] } });
+  assert.equal(known.url, "https://torob.com/shop/7/");
+  assert.equal(known.buy_url, valid);
+});
+
 test("toCard projects a search row into a compact record", () => {
   const card = toCard(searchRow);
   assert.equal(card.prk, "2ee0949f-e7de-4cd8-a45a-ea5bad3eff95");

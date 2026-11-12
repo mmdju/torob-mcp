@@ -43,6 +43,13 @@ The endpoint is **keyless and read-only**, so it sends `Access-Control-Allow-Ori
 
 ## Input handling
 
+- Merchant text is capped and stripped of control, bidi and zero-width tricks
+  while preserving Persian ZWNJ. It remains untrusted data, never instructions
+  for this assistant or its other tools. Sanitization cannot prevent prose-based
+  prompt injection. Purchase links accept only Torob's HTTPS buy-button redirect,
+  without credentials or non-default ports; they still carry Torob's tracking
+  parameters and are returned for browser navigation, never fetched by this server.
+
 - Every tool **advertises** a closed schema (`additionalProperties: false`, added when the tool list is served), which is what tells a client what is accepted. The server itself coerces every argument rather than trusting its type, and validates the ones where a wrong value would silently change an answer: filter slugs and values against the groups that search really accepts, price bounds against each other, pages and limits clamped, URLs parsed rather than followed. An unknown property is ignored, not acted on.
 - All arguments are coerced from unknown input, never trusted.
 - Result lists are capped so a single call cannot ask for an unbounded upstream crawl.

@@ -68,10 +68,27 @@ export function num(v: unknown, fallback: number): number {
 }
 
 export function short(s: unknown, n = 220): string | null {
-  const t = str(s).replace(/\s+/g, " ").trim();
+  // Merchant-authored data can contain invisible direction/control tricks.
+  // Preserve U+200C (ZWNJ), meaningful in Persian. Plain prose is still untrusted.
+  const t = str(s).normalize("NFC")
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+    .replace(/[\u061c\u200b\u200d-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/g, "")
+    .replace(/\s+/g, " ").trim();
   if (!t) return null;
   // Truncate to n INCLUDING the ellipsis, so the caller's cap is a real cap.
   return t.length > n ? t.slice(0, Math.max(1, n - 3)) + "..." : t;
+}
+
+/** Only Torob's known buy-button redirect may become a purchase link. */
+export function torobBuyUrl(value: unknown): string | null {
+  try {
+    const url = new URL(str(value));
+    return url.protocol === "https:" && url.hostname === "api.torob.com" &&
+      !url.port && !url.username && !url.password && url.pathname === "/v4/product-page/redirect/"
+      ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 export function clampLimit(v: unknown, def = 10, max = 30): number {
