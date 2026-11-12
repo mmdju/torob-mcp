@@ -38,7 +38,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "fa-text-utils": "git+https://github.com/mmdju/fa-text-utils.git#v1.0.0"
   },
   "devDependencies": {
