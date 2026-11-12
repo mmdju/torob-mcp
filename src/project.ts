@@ -292,6 +292,7 @@ export function detailsUrlOf(v: unknown): string | null {
     return null;
   }
   if (parsed.protocol !== "https:") return null;
+  if (parsed.port || parsed.username || parsed.password) return null;
   if (parsed.hostname !== DETAILS_HOST) return null;
   if (!parsed.pathname.startsWith(DETAILS_PATH)) return null;
   return parsed.toString();

@@ -58,11 +58,49 @@ test("a details_url handed out earlier follows the relay too", async () => {
   assert.equal(seen[0], "https://relay.example/v4/base-product/details/?search_id=s1&prk=abc");
 });
 
-test("a URL on some other host is left alone", async () => {
+test("a URL outside the configured upstream is refused before fetching", async () => {
   const seen = capture();
   setUpstreamBase("https://relay.example");
-  await torobGet("https://images.torob.com/base/images/a.jpg");
-  assert.equal(seen[0], "https://images.torob.com/base/images/a.jpg");
+  await assert.rejects(() => torobGet("https://images.torob.com/base/images/a.jpg"), /upstream origin/);
+  assert.equal(seen.length, 0);
+});
+
+test("redirects are not followed or retried", async () => {
+  let calls = 0;
+  globalThis.fetch = async (_url, options) => {
+    calls++;
+    assert.equal(options.redirect, "manual");
+    return new Response(null, { status: 302, headers: { location: "https://attacker.example/" } });
+  };
+  await assert.rejects(() => torobGet("/v4/search-trends/"), /redirect/);
+  assert.equal(calls, 1);
+});
+
+test("an oversized streaming response is cancelled without retrying", async () => {
+  let calls = 0;
+  let cancelled = false;
+  globalThis.fetch = async () => {
+    calls++;
+    let chunks = 0;
+    return new Response(new ReadableStream({
+      pull(controller) {
+        if (chunks++ < 20) controller.enqueue(new Uint8Array(1024 * 1024));
+        else controller.close();
+      },
+      cancel() { cancelled = true; },
+    }));
+  };
+  await assert.rejects(() => torobGet("/v4/search-trends/"), /response.*limit/i);
+  assert.equal(calls, 1);
+  assert.equal(cancelled, true);
+});
+
+test("upstream URLs reject credentials, HTTP and unexpected ports", async () => {
+  const seen = capture();
+  for (const url of ["http://api.torob.com/v4/", "https://api.torob.com:444/v4/", "https://user:pass@api.torob.com/v4/"]) {
+    await assert.rejects(() => torobGet(url), /upstream origin/);
+  }
+  assert.equal(seen.length, 0);
 });
 
 test("the switch is reversible, and an empty value means Torob", async () => {
