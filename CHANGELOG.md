@@ -2,6 +2,31 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
+## 0.5.12 - 2026-11-14
+
+Six external pull requests, reviewed line by line against main and merged in one pass: a sixteenth tool, a packaging format, and four hardening fixes. Two of them needed work after the merge - one had been cut against an older tree, one arrived with a merge that had silently dropped changelog entries - and both were brought onto the current tree before landing.
+
+### Added
+
+- **`compare_shopping_list` (#9, behnawwm) - the sixteenth tool.** For a list of 1-10 selected products, each with its card's `details_url` and an optional quantity: every shop's cheapest eligible offer per item, shops ranked by covered items before the quantity-adjusted subtotal, `missing_prks` and a `comparison_complete` flag so a partial basket can never read as a whole one. Shipping is explicitly excluded, uncertain offers are excluded rather than guessed at, and a failed lookup travels in its own row instead of hiding the rest. Each item costs exactly one details fetch.
+- **MCPB packaging (#2, Khojoii).** `npm run build:mcpb` stages `dist/` by its import closure, copies the production dependency tree, writes the manifest's version from package.json, packs `build/torob-mcp.mcpb` and reads the archive back to prove what it claims. `tests/mcpb.test.mjs` gates the manifest against the packager's own schema, and `scripts/verify-mcpb.mjs` proves a bundle end to end by hand. The manifest was refreshed onto the current tree - sixteen tools, current version - and the changelog entries a merge had dropped were restored.
+
+### Fixed
+
+- **Dependencies (#5, behnawwm):** the SDK is pinned to 1.32.2 (the advisory-fix line for the v1 SDK), wrangler moves 4.137 → 4.160.1, and `npm audit` goes from eight findings (three high) to zero.
+- **The local `--http` server (#6, behnawwm) now binds `127.0.0.1` and checks both Host and Origin on `/mcp`.** A neighbour on the same LAN, or a browser tab from anywhere, could previously drive the local server and spend its network's reputation on Torob. Foreign browser Origins are refused by default and allowlisted exactly with `TOROB_ALLOWED_ORIGINS`; curl, stdio and the hosted Worker are unchanged.
+- **Upstream calls are bounded (#7, behnawwm).** `torobGet` stays on the configured origin (Torob, or the operator's relay), refuses redirects instead of following them, and caps response bodies at 6 MiB of decompressed stream - every payload measured is at least four times under it. A details URL carrying credentials or a non-default port is refused before any fetch.
+- **Merchant text is sanitized (#8, behnawwm).** Control, bidi and zero-width tricks are stripped from every capped string while Persian ZWNJ survives, `buy_url` is accepted only on Torob's own HTTPS redirect path, and a shop id must be numeric before it is built into a shop URL.
+
+### Changed
+
+- CI runs on Node 22: wrangler 4.160 declares engines `>= 22.12`, and the suite should not drift from the runtime that deploys.
+- The landing page, both READMEs, the live verify's tool list and the repo description count sixteen tools.
+
+### Coverage
+
+- `tests/shopping-list.test.mjs` (7 tests), `tests/mcpb.test.mjs` (12), plus the new loopback/Origin cases in `tests/local-server.test.mjs` and the redirect/body-cap cases in `tests/relay.test.mjs`.
+
 ## 0.5.11 - 2026-11-14
 
 Two signals Torob already sends and this server dropped on the floor, and one window sized for a chart Torob no longer draws. Every shape below was read off a live response the same day; two candidates died in that check and are listed at the end so nobody re-proposes them blind.

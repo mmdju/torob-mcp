@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "torob-mcp",
   "display_name": "Torob MCP - price comparison intelligence",
-  "version": "0.5.11",
+  "version": "0.5.12",
   "description": "MCP server for Torob (Iran's price-comparison engine): search, compare and price-check across shops. Read-only, no API key.",
   "long_description": "Torob is Iran's price-comparison engine. This bundle runs the torob-mcp server locally over stdio, so an agent can search Torob, read every seller's offer on a product, compare prices across shops, check a product's own price history, look up a seller's Torob profile, find products from a picture link, walk the category tree and list provinces and cities - all in Toman.\n\nAll sixteen tools are read-only and need no API key, no account and no login. This server never signs in to Torob, never solves or evades a bot challenge and never contacts a shop; a challenge is reported as a clear, actionable error instead of being retried into a longer block, which is exactly how the hosted service behaves.\n\nThe bundle is the local half of torob-mcp. The hosted Cloudflare Workers endpoint at https://torob-mcp.mmdju3.workers.dev/mcp is unchanged and still available for clients that prefer a remote URL. A self-hosted run like this one has no rate limit of its own; the hosted copy answers at most 20 `/mcp` calls a minute per client IP.\n\nPrices and stock move constantly, and an answer may be served from what this server fetched up to half an hour ago - always confirm on torob.com before buying. This project is not affiliated with or endorsed by Torob.",
   "author": {

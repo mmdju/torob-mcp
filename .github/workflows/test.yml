@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       # `npm ci` from the lockfile: the one dependency that is not on the npm
       # registry is fetched over https, so no deploy key is needed here.
       - run: npm ci
