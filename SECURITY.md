@@ -50,6 +50,11 @@ The hosted demo endpoint is **keyless and read-only**, so it sends `Access-Contr
 
 ## Input handling
 
+- Outbound requests are restricted to the exact HTTPS origin of Torob's API
+  (or the explicitly configured relay). URLs containing credentials are refused.
+  Redirects are never followed, and response bodies are streamed with a 6 MiB
+  ceiling, independent of Content-Length. Limit and redirect failures are not retried.
+
 - Every tool **advertises** a closed schema (`additionalProperties: false`, added when the tool list is served), which is what tells a client what is accepted. The server itself coerces every argument rather than trusting its type, and validates the ones where a wrong value would silently change an answer: filter slugs and values against the groups that search really accepts, price bounds against each other, pages and limits clamped, URLs parsed rather than followed. An unknown property is ignored, not acted on.
 - All arguments are coerced from unknown input, never trusted.
 - Result lists are capped so a single call cannot ask for an unbounded upstream crawl.

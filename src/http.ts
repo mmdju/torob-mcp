@@ -132,6 +132,39 @@ export class UpstreamError extends Error {
   }
 }
 
+const MAX_RESPONSE_BYTES = 6 * 1024 * 1024;
+
+function assertUpstreamUrl(value: string): void {
+  const url = new URL(value);
+  if (url.protocol !== "https:" || url.origin !== new URL(upstreamBaseUrl()).origin || url.username || url.password) {
+    throw new UpstreamError("Refused a URL outside the configured upstream origin.", "usage");
+  }
+}
+
+async function readCapped(res: Response): Promise<string> {
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_RESPONSE_BYTES) {
+        throw new UpstreamError("Torob's response exceeded the 6 MiB response limit. Try a narrower request.", "usage");
+      }
+      chunks.push(decoder.decode(value, { stream: true }));
+    }
+    chunks.push(decoder.decode());
+    return chunks.join("");
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // One upstream call at a time, and the slot is held until that attempt ends.
@@ -330,6 +363,7 @@ async function closeWallIfEarned(startedAt: number): Promise<void> {
  */
 export async function torobGet<T = unknown>(path: string, opts?: { retries?: number }): Promise<T> {
   const url = upstreamUrlFor(path);
+  assertUpstreamUrl(url);
   const retries = opts?.retries ?? MAX_RETRIES;
   let lastError: unknown = null;
 
@@ -350,6 +384,7 @@ export async function torobGet<T = unknown>(path: string, opts?: { retries?: num
       try {
         const startedAt = Date.now();
         const res = await fetch(url, {
+          redirect: "manual",
           headers: {
             "User-Agent": UA,
             Accept: "application/json",
@@ -359,7 +394,11 @@ export async function torobGet<T = unknown>(path: string, opts?: { retries?: num
           },
           signal: controller.signal,
         });
-        const body = await res.text();
+        if (res.status >= 300 && res.status < 400) {
+          await res.body?.cancel();
+          throw new UpstreamError("Refused an upstream redirect. Check Torob's endpoint or your configured relay.", "usage");
+        }
+        const body = await readCapped(res);
 
         // A challenge is never retried: solving it is not this server's job and
         // hammering the endpoint while it is up is how a temporary block becomes
