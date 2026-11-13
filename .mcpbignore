@@ -1,0 +1,16 @@
+# Second line of defence for `mcpb pack`, which already drops .git, .env*,
+# *.mcpb, *.d.ts, *.map, node_modules/.bin and the lockfiles on its own.
+#
+# scripts/build-mcpb.mjs stages the bundle explicitly, so everything below is
+# already absent by the time packing starts. It is written out anyway because a
+# staging change should not be able to ship a secret by accident, and because
+# `mcpb pack .` in a clone has to be safe too.
+.env
+.env.*
+.dev.vars
+*.pem
+*.key
+*.p12
+*.pfx
+*.mcpb
+node_modules/.bin/
