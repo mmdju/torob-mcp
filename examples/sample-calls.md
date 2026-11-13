@@ -111,7 +111,7 @@ price_history { "prk": "ca10472a-…", "details_url": "…", "months": 12 }
   points_available: 54
   series: [ { label: "کمترین قیمت", latest: { date: "۲۶ مرداد ۱۴۰۵", value: 689999 } },
             { label: "میانگین قیمت", latest: { date: "۲۶ مرداد ۱۴۰۵", value: 1243456 } } ]
-  reading: "Over the newest 12 monthly point(s) … the lowest figure Torob charts
+  reading: "Over the newest 12 chart point(s) … the lowest figure Torob charts
             is 689٬999 Toman (۲۶ مرداد ۱۴۰۵) and the highest …"
   last_modified: "2026-09-30T20:33:05+00:00"
 ```

@@ -2,6 +2,27 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
+## 0.5.10 - 2026-11-14
+
+A pass over the words the server says about itself, each one checked against the live API before it was rewritten - three claims had drifted from what Torob actually does, and one memory could quietly forget what it knew.
+
+### Fixed
+
+- **A row that carries only half of the name-and-URL pair no longer wipes the half already known.** Every id this server hands out travels with a details URL and the product name, and both are kept twice: in the isolate's own map and in the per-colo store. The store already kept what it knew - its write happens only for a present name and only carries a present URL - but the map overwrote without looking: the synthetic row a caller's `details_url` becomes has no name (so the name went null), and a search row with a broken link has no usable URL (so the URL went empty). Either loss costs a fresh upstream search the next time the id has to resolve. The map now merges, the same rule the store always followed. Measured in a test: a search row with a broken link after a good one, then `product_details` on the id, resolves as `remembered` with two searches instead of `name-search` with three.
+- **The price bounds now say they are strict, because they are.** `min_price_toman` / `max_price_toman` compile to upstream's `price__gt` / `price__lt` - strictly above and strictly below - while both descriptions and the tool reference promised "at or above" / "at or below". The inclusive forms exist in name only: measured live on 2026-11-14, `price__gte=1000000` and `price__lte=5000000` on a search answered with the unfiltered count (1200 of 1200), so Torob drops both slugs silently and a product priced exactly at a bound really is left out. The words now say so instead of promising a boundary that does not exist.
+- **The price chart is no longer described as monthly, because it is not.** Measured live on 2026-11-14: one product's chart carried 20 points across two months, with three of them in its last three days - denser near today, and a different density again on a second product. Every "monthly" has gone: the tool description and its `months` parameter now describe dated points that are denser near today, the `reading` sentence and the `window_note` count chart points, and `docs/`, `examples/`, the server instructions and the comments match. The parameter keeps its name - the tool-facing names are stable - and the answer's `window.from/to` is the honest account of what any window covers.
+
+### Changed
+
+- **`special_offers` says "at most half an hour old", which is what its cache does.** The description and the tool reference said "refreshed every ten minutes"; the cache behind it has been thirty minutes since the TTLs were set against the wall. The text now matches the number.
+- **`find_best_value` passes its query into the delivery enrichment.** The details calls behind `include_delivery` can now fall back to the wording the user asked with, the same rung every other product call has - it changes nothing when the card's `details_url` is present, which it normally is, and gives the ladder a step it otherwise lacked.
+- **The local `--http` transport drops a condition that could never fire.** The path is split from the query string before routing, so a `startsWith("/mcp?")` check on it was dead code.
+- **`package-lock.json` resolves `fa-text-utils` over https, like `package.json` already did.** The lockfile still pinned the git+ssh URL, so a fresh clone without an SSH key could trip `npm ci` even though CI passed.
+
+### Coverage
+
+- `tests/tools.test.mjs`: a broken link on a later search row does not erase the URL an earlier one learned - the id resolves as `remembered` with no third search.
+
 ## 0.5.9 - 2026-10-12
 
 The docs described the bot challenge as a rule - where a call comes from decides it, and a connection Torob does not score passes - and pointed at two ways out as if they were fixes. A measurement taken today says the rule is softer than that, so what a caller is told had to change before what the docs claim did.

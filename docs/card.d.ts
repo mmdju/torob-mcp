@@ -429,7 +429,7 @@ export interface PriceChange {
 export interface PriceHistoryResponse {
   prk: string;
   window: { from: string | null; to: string | null; points: number };
-  /** How many monthly points Torob charts in total, before `months`. */
+  /** How many dated points Torob charts in total, before `months`. */
   points_available: number;
   series: PriceSeries[];
   /** One plain sentence built from the numbers above. */

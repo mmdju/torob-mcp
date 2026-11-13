@@ -255,8 +255,11 @@ const searchTool: ToolDef = {
       },
       city: { type: "string", description: "Filter by delivery city id, e.g. from list_locations." },
       shop_type: { type: "string", enum: [...SHOP_TYPES], description: "offline = shops with a branch, online = online sellers." },
-      min_price_toman: { type: "number", description: "Only show products at or above this price." },
-      max_price_toman: { type: "number", description: "Only show products at or below this price." },
+      // Strict, and the words say so: Torob ignores price__gte / price__lte
+      // (measured 2026-11-14 - both returned the unfiltered count), so a
+      // product priced exactly at a bound is left out.
+      min_price_toman: { type: "number", description: "Only show products priced above this price (a product priced exactly at it is left out)." },
+      max_price_toman: { type: "number", description: "Only show products priced below this price (a product priced exactly at it is left out)." },
       filters: {
         type: "object",
         description:
@@ -763,7 +766,7 @@ const bestValueTool: ToolDef = {
       const enriched: Record<string, unknown>[] = [];
       for (const pick of ranked.slice(0, 3)) {
         try {
-          const details = await productDetails(pick.prk, { detailsUrl: pick.details_url ?? undefined });
+          const details = await productDetails(pick.prk, { detailsUrl: pick.details_url ?? undefined, query });
           enriched.push({
             prk: pick.prk,
             name_fa: details.name_fa,
@@ -986,7 +989,7 @@ const offersTool: ToolDef = {
   description:
     "The deals Torob is featuring right now - merchandising, not shop data. Useful for 'anything cheap " +
     "right now?' and seasonal campaigns. It is NOT the seller list for a product: for that, use " +
-    "product_details. A small fixed list, refreshed every ten minutes.",
+    "product_details. A small fixed list, at most half an hour old.",
   inputSchema: {
     type: "object",
     properties: {
@@ -1020,7 +1023,7 @@ function priceReading(chart: PriceChart): string | null {
     .map((s) => `${s.label} ${formatToman(s.latest?.value ?? null)} Toman (${s.latest?.date})`)
     .join("; ");
   return (
-    `Over the newest ${chart.window.points} monthly point(s) (${chart.window.from} to ${chart.window.to}) the lowest ` +
+    `Over the newest ${chart.window.points} chart point(s) (${chart.window.from} to ${chart.window.to}) the lowest ` +
     `figure Torob charts is ${formatToman(lowest.value)} Toman (${lowest.date}) and the highest ${formatToman(highest.value)} ` +
     `(${highest.date}). Latest: ${latest}.`
   );
@@ -1030,7 +1033,7 @@ const priceHistoryTool: ToolDef = {
   name: "price_history",
   title: "Price history and trend for one product",
   description:
-    "Torob's own price chart for a product: monthly points going back years, each series carrying Torob's own label " +
+    "Torob's own price chart for a product: dated points going back years, denser near today, each series carrying Torob's own label " +
     "(the average and the lowest price it has charted), when the price was last updated, and - with include_changes - " +
     "the newest price changes across its shops. This is the 'is now a good time to buy?' call: compare today's price " +
     "with the lowest this product has been. Pass the prk from a search_products card together with that card's details_url.",
@@ -1044,7 +1047,9 @@ const priceHistoryTool: ToolDef = {
       },
       months: {
         type: "number",
-        description: "How many monthly points to return, newest last (default 12, max 54).",
+        description:
+          "How many chart points to return, newest last (default 12, max 54). Torob's points are denser near " +
+          "today and vary per product - read window.from/to in the answer and raise this when the window is too narrow.",
       },
       include_changes: {
         type: "boolean",
@@ -1072,7 +1077,7 @@ const priceHistoryTool: ToolDef = {
       series: chart.series,
       ...(chart.points_available > chart.window.points
         ? {
-            window_note: `Torob charts ${chart.points_available} monthly point(s) for this product; showing the newest ${chart.window.points}. Raise months to see more.`,
+            window_note: `Torob holds ${chart.points_available} point(s) for this product; showing the newest ${chart.window.points}. Raise months to see more.`,
           }
         : {}),
       reading: priceReading(chart),

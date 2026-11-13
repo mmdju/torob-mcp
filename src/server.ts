@@ -9,7 +9,7 @@ import { UpstreamError } from "./http.js";
 import { setWaitUntilEnabled, takePendingWrites, type WaitUntil } from "./project.js";
 import { READ_ONLY, TOOLS } from "./tools.js";
 
-export const VERSION = "0.5.9";
+export const VERSION = "0.5.10";
 
 // Server-level guidance: cheaper than repeating it in every tool description,
 // and it steers the agent before it picks a tool at all. It is the first thing
@@ -33,7 +33,7 @@ export const INSTRUCTIONS = [
   "product in a physical shop, with city, address, price and whether the shop is open, plus the spec tables, the " +
   "variant tabs and Torob's own price_range_toman. An in-person price is that shop's own and can be months old, " +
   "so read its last_price_change_date out loud rather than presenting a shelf price as today's.",
-  "price_history answers 'is now a good time to buy': Torob's own monthly chart for one product, its lowest and " +
+  "price_history answers 'is now a good time to buy': Torob's own price chart for one product, its lowest and " +
   "highest charted figures, when the price was last updated, and - with include_changes - the newest moves across " +
   "its shops. The series labels are Torob's; quote them as such instead of inventing a trend.",
   "search_by_image takes a public image URL and nothing else, and its matched_product names the one product Torob " +

@@ -515,6 +515,35 @@ test("product_details re-finds an id through the name it was learned under", asy
   );
 });
 
+test("a row with a broken link does not erase the details URL the id already has", async () => {
+  // A search row without a usable more_info_url used to overwrite what this
+  // isolate already knew about the id: the URL went empty in the local map, and
+  // resolving the id cost a fresh name search. The map now follows the rule the
+  // shared store always had - a blank half never wipes a known half.
+  const id = "9a1b2c3d-0000-4000-8000-aaaaaaaa0001";
+  const good = {
+    ...searchPayload.results[0],
+    random_key: id,
+    name1: "هدفون بی‌سیم X200",
+    more_info_url: `https://api.torob.com/v4/base-product/details/?search_id=s1&prk=${id}`,
+  };
+  const broken = { random_key: id, name1: "هدفون بی‌سیم X200", price: 50000000, more_info_url: "https://example.invalid/nope" };
+  const searches = [];
+  stub((url) => {
+    if (url.includes("base-product/search")) {
+      searches.push(url);
+      return { ...searchPayload, results: [searches.length === 1 ? good : broken] };
+    }
+    if (url.includes("/details/")) return { ...detailsPayload, random_key: id };
+    return { results: [], count: 0, next: "" };
+  });
+  await run("search_products", { query: "کلید-نشانی-یک" });
+  await run("search_products", { query: "کلید-نشانی-دو" });
+  const out = await run("product_details", { prk: id });
+  assert.equal(out.resolved_by, "remembered", "the good URL from the first search still resolves the id");
+  assert.equal(searches.length, 2, "no third search was spent re-finding what was already known");
+});
+
 test("an id-only answer for another product is never remembered as this one", async () => {
   // The id-only probe is the one call that can be answered by a different
   // product. Caching that answer under the probed id would serve it later

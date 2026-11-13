@@ -429,6 +429,16 @@ function rememberDetailUrl(row: RawProduct): void {
   if (!prk) return;
   const name = short(row.name1, 160);
   const url = detailsUrlOf(row.more_info_url);
+  // A row that carries only half the pair must not wipe the half this isolate
+  // already knows: the synthetic row a caller's details_url becomes has no
+  // name, and a search row with a broken link has no usable URL. Either blank
+  // field used to overwrite its known half in the local map - while the shared
+  // store, whose write only happens for a present name and only carries a
+  // present URL, already kept both. The map now follows the same rule.
+  const known = detailUrls.get(prk);
+  const mergedName = name ?? known?.name ?? null;
+  const mergedUrl = url ?? known?.url ?? "";
+  rememberResolved(prk, mergedUrl, mergedName);
   // The name is remembered even when the URL is not usable, and that case is
   // the whole reason the name search exists: a URL that stops parsing (an
   // upstream shape change, a truncated link) leaves the id with no address, and
@@ -436,9 +446,8 @@ function rememberDetailUrl(row: RawProduct): void {
   // only when both were present made that rung unreachable - the id went
   // straight to the id-only probe instead. An entry without a name could not be
   // re-found by a search anyway, so the cache write still needs one.
-  rememberResolved(prk, url ?? "", name);
-  if (name) {
-    keepAlive(cacheSet(prk, { name, ...(url ? { url } : {}) }, REMEMBERED_TTL_SECONDS));
+  if (mergedName) {
+    keepAlive(cacheSet(prk, { name: mergedName, ...(mergedUrl ? { url: mergedUrl } : {}) }, REMEMBERED_TTL_SECONDS));
   }
 }
 
@@ -1635,7 +1644,7 @@ export async function similarProducts(
 // ---------------------------------------------------- price and shop calls
 
 /**
- * Torob's own price chart for a product: monthly points, each series carrying
+ * Torob's own price chart for a product: dated points (denser near today), each series carrying
  * its own label ("میانگین قیمت", "کمترین قیمت"). The upstream call takes only
  * the prk - the site adds a timestamp to defeat its CDN, which this server
  * deliberately does not do: the local TTL is what decides freshness, and a
@@ -1894,7 +1903,7 @@ export interface PriceSeries {
 
 export interface PriceChart {
   series: PriceSeries[];
-  /** How many monthly points Torob charts in total, before our own window. */
+  /** How many dated points Torob charts in total, before our own window. */
   points_available: number;
   window: { from: string | null; to: string | null; points: number };
 }
@@ -1916,7 +1925,7 @@ function pointsOf(entries: unknown, labels: string[]): PricePoint[] {
   return points.map((p) => p.point);
 }
 
-/** Project Torob's chart, keeping only the last `months` monthly points. */
+/** Project Torob's chart, keeping only the last `months` points. */
 export function priceChartOf(raw: unknown, months: number): PriceChart {
   const labels = Array.isArray((raw as any)?.labels) ? ((raw as any).labels as unknown[]).map((l) => str(l).trim()) : [];
   const dataSets = Array.isArray((raw as any)?.dataSets) ? ((raw as any).dataSets as any[]) : [];

@@ -58,8 +58,8 @@ Search Torob, get **compact cards**: the cheapest offer in Toman, the shop behin
 | `brand` | string | Brand **id** from the brand group of `available_filters` (`options[].value`, `brand_values[].value`, or the `id` of an entry in the full list at its `values_url`), e.g. `17418` for MikroTik. Torob filters on the id and ignores a slug or display name; a name or slug is mapped onto the id when this search shows the brand group, and a **word that maps to nothing is refused with the brands the search really offers** instead of being sent and silently dropped. A brand passed inside `filters` is taken over by this argument, so it is never echoed back as an applied filter |
 | `city` | string | Delivery-city id, from `list_locations` |
 | `shop_type` | string | `offline` (products that have an in-person seller) · `online` (online sellers) |
-| `min_price_toman` | number | Only products at or above this price |
-| `max_price_toman` | number | Only products at or below this price |
+| `min_price_toman` | number | Only products priced **above** this price - a product priced exactly at it is left out |
+| `max_price_toman` | number | Only products priced **below** this price - a product priced exactly at it is left out |
 | `filters` | object | Values from `available_filters` of the same query, e.g. `{"available": "1", "storage": "1 tb"}`. A value the search does not offer is refused with the real ones |
 | `limit` | number | How many cards (default 10, max 24 - upstream returns 24-26 rows a page whatever is asked) |
 
@@ -181,7 +181,7 @@ Torob's own price chart for one product: month-by-month points, when the price l
 |---|---|---|---|
 | `prk` | string | **yes** | From a `search_products` card, or a torob.com product URL |
 | `details_url` | string | no | The `details_url` from the same card, so the id resolves with no lookup |
-| `months` | number | no | How many monthly points to return, newest last (default 12, max 54) |
+| `months` | number | no | How many chart points to return, newest last (default 12, max 54). Torob's points are denser near today and vary per product - read `window.from/to` and raise this when the window is too narrow |
 | `include_changes` | boolean | no | Also read the newest price changes. **Costs one extra upstream request** |
 | `changes_limit` | number | no | How many changes with `include_changes` (default 5, max 20) |
 
@@ -191,7 +191,7 @@ Returns:
 |---|---|
 | `series[]` | One entry per series Torob charts: `label` (Torob's own, e.g. `"میانگین قیمت"` / `"کمترین قیمت"`), `color`, `points[]` (`{date, value}` in Toman, oldest first), `latest`, `lowest`, `highest` |
 | `window` | `{from, to, points}` - the dates the returned points cover |
-| `points_available` | How many monthly points Torob charts in total, before `months` |
+| `points_available` | How many dated points Torob charts in total, before `months` |
 | `reading` | One plain sentence built from those numbers - the lowest and highest figure charted, and the latest point of every series |
 | `last_modified` | Torob's own timestamp for this product's last price update |
 | `last_modified_note` | Why that timestamp is not a promise: prices move after it |
@@ -200,7 +200,7 @@ Returns:
 
 - **The series labels are Torob's, not this server's.** Quote them; do not turn a chart into a forecast.
 - `points_available` larger than `window.points` means the chart is longer than the window you asked for - raise `months` instead of inventing what came before.
-- The chart is monthly and cached for six hours; the freshness line and the change feed for thirty minutes.
+- The chart's points are denser near today and vary per product; the chart is cached for six hours, the freshness line and the change feed for thirty minutes.
 
 ## `similar_products`
 
@@ -352,4 +352,4 @@ The deals Torob is currently featuring. **This is merchandising, not shop data**
 |---|---|---|---|
 | `limit` | number | no | How many (default 10, max 30) |
 
-Returns `count` and `offers[]`: `group` (the campaign the banner belongs to), `title`, `description`, `image`, `url`. Refreshed every ten minutes.
+Returns `count` and `offers[]`: `group` (the campaign the banner belongs to), `title`, `description`, `image`, `url`. At most half an hour old.

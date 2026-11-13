@@ -86,7 +86,7 @@ async function main() {
         // HEAD used to fall through to 404, which reads as "not an MCP
         // endpoint" when it is one. Node drops the body for a HEAD on its own.
         (req.method === "GET" || req.method === "HEAD") &&
-        (path === "/mcp" || (path || "").startsWith("/mcp?"))
+        path === "/mcp"
       ) {
         // Same rule as worker.ts: the transport is GET-stream-or-405, and a
         // browser is the only client that asks for text/html. Answering 200

@@ -92,7 +92,10 @@ export const TTL = {
   similar: 30 * MIN,
   locations: 24 * HOUR, // province/city lists are administrative facts
   offers: 30 * MIN,
-  // The chart is monthly, so an hourly refresh is already finer than the data.
+  // The chart's points are denser near today and vary per product (measured
+  // 2026-11-14: 20 points across two months on one product, three of them in
+  // its last three days), so an hourly-finer refresh is already finer than any
+  // of it.
   chart: 6 * HOUR,
   changes: 30 * MIN, // "۸ ساعت پیش" is the unit here, so half an hour is enough
   freshness: 30 * MIN,
