@@ -36,6 +36,10 @@ import {
 
 /** One seller offer for a product. */
 export interface Offer {
+  /** Listing wording to check against the exact variant before buying. */
+  listing_title: string | null;
+  /** False when availability was inferred from price rather than stated. */
+  availability_confirmed: boolean;
   shop_name: string;
   shop_city: string | null;
   shop_id: string | null;
@@ -144,6 +148,7 @@ export interface ProductDetails extends ProductCard {
 // loosely shaped; typing the whole thing would be a lie that breaks silently.
 
 interface RawOffer {
+  name1?: unknown;
   shop_name?: unknown;
   shop_name2?: unknown;
   shop_id?: unknown;
@@ -491,6 +496,8 @@ function toOffer(raw: RawOffer): Offer | null {
   const buyUrl = torobBuyUrl(raw.page_url);
   return {
     shop_name: shop,
+    listing_title: short(raw.name1, 160),
+    availability_confirmed: typeof raw.availability === "boolean",
     shop_city: short(raw.shop_name2, 60),
     shop_id: shopId || null,
     shop_score: shopScore(raw.shop_score, raw.shop_votes_count),

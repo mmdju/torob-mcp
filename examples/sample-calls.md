@@ -223,3 +223,20 @@ alone reads as "no such product", which is a claim nobody verified.
   score and the rest of the list.
 - **Do not present a `price_unreliable` offer as a bargain.** Torob is saying
   it cannot vouch for that number; pass the warning on.
+# Compare a shopping list across shops
+
+Search each requested product and confirm its exact model, capacity, size and
+variant first. Then call `compare_shopping_list` with 1-10 `{prk, details_url,
+quantity}` objects copied from those search cards. Coverage ranks before
+subtotal: a shop carrying all 4 products comes before one carrying only 2,
+even if the partial subtotal is lower. Read `missing_prks` and per-item errors.
+
+Use `page` and `limit` to examine additional shops without truncating the
+seller lists used for comparison. Shipping is excluded, and the requested
+quantity still needs confirmation at checkout.
+
+For manual handoff, open each returned product URL and use Torob's heart
+button in the user's logged-in browser; `favorites_url` links to the list.
+Alternatively open the chosen shop's `buy_url` links, verify the listings,
+and add them to that merchant's cart. The MCP itself does not write favorites,
+authenticate, create carts, place orders or pay.

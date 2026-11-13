@@ -13,6 +13,7 @@
 
 import { ATTRIBUTION, SHOP_PAGE_MAX, SHOP_TYPES, SORTS, SORT_LABELS, type ShopType, type Sort } from "./config.js";
 import { UpstreamError } from "./http.js";
+import { shoppingListTool } from "./shopping-list.js";
 import { clampLimit, clampPage, foldKey, formatToman, num, pageClampNote, str } from "./normalize.js";
 import {
   OPTION_PREVIEW,
@@ -1345,6 +1346,7 @@ const guideTool: ToolDef = {
 };
 
 export const TOOLS: ToolDef[] = [
+  shoppingListTool,
   suggestTool,
   searchTool,
   detailsTool,

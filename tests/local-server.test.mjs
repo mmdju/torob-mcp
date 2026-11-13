@@ -108,7 +108,7 @@ test("node dist/index.js serves MCP over stdio and creates its store", async () 
 
     const list = await request(2, "tools/list", {});
     assert.equal(list.error, undefined, `tools/list failed: ${JSON.stringify(list.error)}`);
-    assert.equal(list.result.tools.length, 15, "the local server offers the same fifteen tools");
+    assert.equal(list.result.tools.length, 16, "the local server offers the same sixteen tools");
     assert.ok(
       list.result.tools.every((t) => t.annotations?.readOnlyHint === true),
       "and every one of them is still read-only"

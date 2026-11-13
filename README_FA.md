@@ -3,7 +3,7 @@
 ![بنر ترب MCP](assets/torob-mcp.png)
 
 [![Live verify](https://github.com/mmdju/torob-mcp/actions/workflows/verify.yml/badge.svg)](https://github.com/mmdju/torob-mcp/actions/workflows/verify.yml)
-![15 tools](https://img.shields.io/badge/tools-15-blue)
+![16 tools](https://img.shields.io/badge/tools-16-blue)
 ![read-only](https://img.shields.io/badge/access-read--only-brightgreen)
 ![no API key](https://img.shields.io/badge/API%20key-not%20needed-lightgrey)
 ![MIT](https://img.shields.io/badge/license-MIT-yellow.svg)
