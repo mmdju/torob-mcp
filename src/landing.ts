@@ -258,7 +258,7 @@
     <div class="statsgrid">
       <a class="stat" href="https://github.com/mmdju/torob-mcp" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg><span class="v" id="stStars">…</span><span class="k" id="stStarsK">استار</span></a>
       <a class="stat" href="https://github.com/mmdju/torob-mcp/forks" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92c0-1.61-1.31-2.92-2.92-2.92z"/></svg><span class="v" id="stForks">…</span><span class="k" id="stForksK">فورک</span></a>
-      <a class="stat" href="/mcp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.4-2.4c.4-.4.4-1 0-1.4z"/></svg><span class="v" data-count="15">15</span><span class="k" id="stToolsK">ابزار</span></a>
+      <a class="stat" href="/mcp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.4-2.4c.4-.4.4-1 0-1.4z"/></svg><span class="v" data-count="16">16</span><span class="k" id="stToolsK">ابزار</span></a>
       <a class="stat" href="/health"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg><span class="v" id="stVersion">…</span><span class="k" id="stVersK">نسخه</span></a>
     </div>
   </section>
@@ -531,8 +531,8 @@
     "Just ask: «a phone under 200 million?»",
     "Read-only — no key, no login."
   ];
-  var HEALTH_OK_EN = "Service is live", STATS_EN = "15 tools · prices in Toman", NOTE_EN = "Independent project — not affiliated with Torob · quick-test copy: rate limited, and paused from time to time", SHARE_EN = "Share", SHARED_EN = "Link copied", GH_EN = "GitHub", VER_EN = " · v", QR_EN = "QR", QRH_EN = "Scan with your phone", QRCOPY_EN = "Copy link", QRCLOSE_EN = "Close";
-  var HEALTH_OK_FA = "سرویس زنده است", STATS_FA = "۱۵ ابزار · قیمت به تومان", NOTE_FA = "پروژه‌ای مستقل — وابسته به ترب نیست · نسخهٔ تستی سریع: محدودیت داره و هر چند وقت متوقف می‌شه", SHARE_FA = "اشتراک", SHARED_FA = "پیوند کپی شد", GH_FA = "گیت‌هاب", VER_FA = " · نسخه ", QR_FA = "کیوآر", QRH_FA = "اسکن با گوشی", QRCOPY_FA = "کپی پیوند", QRCLOSE_FA = "بستن";
+  var HEALTH_OK_EN = "Service is live", STATS_EN = "16 tools · prices in Toman", NOTE_EN = "Independent project — not affiliated with Torob · quick-test copy: rate limited, and paused from time to time", SHARE_EN = "Share", SHARED_EN = "Link copied", GH_EN = "GitHub", VER_EN = " · v", QR_EN = "QR", QRH_EN = "Scan with your phone", QRCOPY_EN = "Copy link", QRCLOSE_EN = "Close";
+  var HEALTH_OK_FA = "سرویس زنده است", STATS_FA = "۱۶ ابزار · قیمت به تومان", NOTE_FA = "پروژه‌ای مستقل — وابسته به ترب نیست · نسخهٔ تستی سریع: محدودیت داره و هر چند وقت متوقف می‌شه", SHARE_FA = "اشتراک", SHARED_FA = "پیوند کپی شد", GH_FA = "گیت‌هاب", VER_FA = " · نسخه ", QR_FA = "کیوآر", QRH_FA = "اسکن با گوشی", QRCOPY_FA = "کپی پیوند", QRCLOSE_FA = "بستن";
   var STATH_EN = "Project stats", STATH_FA = "آمار پروژه", STST_EN = "Stars", STST_FA = "استار", STFK_EN = "Forks", STFK_FA = "فورک", STTL_EN = "Tools", STTL_FA = "ابزار", STVR_EN = "Version", STVR_FA = "نسخه";
   var isEn = false;
   document.getElementById("langB").addEventListener("click", function () {

@@ -163,7 +163,7 @@ Every tool is read-only (`readOnlyHint: true`) and needs no credentials. Nothing
 - **An unknown filter slug or value is refused with the real ones** (`available_filters` carries every group's accepted values). Torob ignores what it does not know and answers **unfiltered**, which is exactly why this server refuses first.
 - **Torob answers a client that calls too fast with a bot challenge instead of data.** The server reports it plainly, never solves or evades it, and holds the rest of a burst for the whole cooldown. Details in [SECURITY.md](SECURITY.md).
 - Results are **capped** (default 10, each tool's own maximum in [docs/tools.md](docs/tools.md)) to protect agent context, and Persian wording is folded (Arabic yeh/kaf, mixed digits, ZWNJ) when names are compared - the query reaches Torob exactly as typed.
-- **[examples/sample-calls.md](examples/sample-calls.md)** has eleven copy-paste flows, **[docs/tools.md](docs/tools.md)** every parameter and filter slug, and **[docs/card.d.ts](docs/card.d.ts)** the response types.
+- **[examples/sample-calls.md](examples/sample-calls.md)** has thirteen copy-paste flows, **[docs/tools.md](docs/tools.md)** every parameter and filter slug, and **[docs/card.d.ts](docs/card.d.ts)** the response types.
 
 ## Compare a shopping list
 

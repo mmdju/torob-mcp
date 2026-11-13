@@ -105,6 +105,7 @@ const tools = (await rpc("tools/list", {}, 2)).result.tools.map((t) => t.name).s
 const expected = [
   "browse_categories",
   "compare_products",
+  "compare_shopping_list",
   "find_best_value",
   "find_shops",
   "list_locations",

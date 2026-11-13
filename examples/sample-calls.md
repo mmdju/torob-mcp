@@ -223,7 +223,7 @@ alone reads as "no such product", which is a claim nobody verified.
   score and the rest of the list.
 - **Do not present a `price_unreliable` offer as a bargain.** Torob is saying
   it cannot vouch for that number; pass the warning on.
-# Compare a shopping list across shops
+## "Compare a shopping list across shops"
 
 Search each requested product and confirm its exact model, capacity, size and
 variant first. Then call `compare_shopping_list` with 1-10 `{prk, details_url,
