@@ -39,7 +39,14 @@ What bounds the upstream load is the pacing and the gate above. A burst of paral
 
 ## CORS
 
-The endpoint is **keyless and read-only**, so it sends `Access-Control-Allow-Origin: *` and answers `OPTIONS` preflights. There are no cookies or credentials to leak; browser-based MCP clients (Inspector, web agents) need this to connect at all.
+Local Node HTTP mode binds to `127.0.0.1` only and checks both Host and Origin
+on `/mcp`, including preflights. Browser Origins are rejected by default. To use
+a trusted browser client, set `TOROB_ALLOWED_ORIGINS` to its exact origin (or a
+comma-separated list, e.g. `http://localhost:6274`). No wildcard is reflected.
+Normal stdio and non-browser HTTP clients need no setting. Do not expose this
+local service through a reverse proxy without adding authentication there.
+
+The hosted demo endpoint is **keyless and read-only**, so it sends `Access-Control-Allow-Origin: *` and answers `OPTIONS` preflights. There are no cookies or credentials to leak; browser-based MCP clients (Inspector, web agents) need this to connect at all.
 
 ## Input handling
 

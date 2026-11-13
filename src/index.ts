@@ -9,9 +9,10 @@ import { LANDING, MCP_PAGE } from "./landing.js";
 import { buildServer, VERSION } from "./server.js";
 import { installFileStore } from "./store-node.js";
 
-// Browser-based MCP clients cannot POST /mcp without CORS (same as worker.ts).
+// The public demo and the local process have different trust boundaries.
+// Local browser clients must be explicitly allowed; stdio needs no CORS.
+const allowedOrigins = new Set((process.env.TOROB_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean));
 const CORS_HEADERS = {
-  "access-control-allow-origin": "*",
   "access-control-allow-methods": "POST, GET, OPTIONS",
   "access-control-allow-headers": "content-type, mcp-session-id, mcp-protocol-version, authorization",
   "access-control-expose-headers": "mcp-session-id",
@@ -36,12 +37,24 @@ async function main() {
       // on pathname. Matching the raw string made one runtime answer and the
       // other 404 the very same request.
       const path = (req.url ?? "").split("?")[0];
+      if (path === "/mcp") {
+        let host = "";
+        try { host = new URL(`http://${req.headers.host ?? ""}`).hostname; } catch { /* reject below */ }
+        const origin = req.headers.origin;
+        if (!["127.0.0.1", "localhost"].includes(host) || (origin !== undefined && !allowedOrigins.has(origin))) {
+          res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end("Origin or Host not allowed");
+          return;
+        }
+        if (origin !== undefined) {
+          res.setHeader("access-control-allow-origin", origin);
+          res.setHeader("vary", "Origin");
+        }
+      }
       if (req.method === "OPTIONS" && path === "/mcp") {
         res.writeHead(204, { ...CORS_HEADERS, "access-control-max-age": "86400" }).end();
         return;
       }
       if (req.method === "POST" && path === "/mcp") {
-        res.setHeader("access-control-allow-origin", CORS_HEADERS["access-control-allow-origin"]);
         res.setHeader("access-control-expose-headers", CORS_HEADERS["access-control-expose-headers"]);
         let body = "";
         let tooBig = false;
@@ -113,7 +126,7 @@ async function main() {
         res.writeHead(404).end("Not found. POST /mcp for MCP, GET /health for health.");
       }
     });
-    http.listen(PORT, () => console.error(`torob-mcp HTTP on :${PORT}/mcp`));
+    http.listen(PORT, "127.0.0.1", () => console.error(`torob-mcp HTTP on 127.0.0.1:${PORT}/mcp`));
   } else {
     await buildServer().connect(new StdioServerTransport());
   }
