@@ -278,7 +278,7 @@ try {
     }
     await pause();
 
-    // The chart is Torob's own: monthly points plus the shop-level changes.
+    // The chart is Torob's own: dated points, denser near today, plus the shop-level changes.
     // The first card of a phone search is normally charted; when it is not, the
     // next card is tried before the shape is called broken. An empty chart and
     // a renamed upstream field look the same from here, so the live check needs

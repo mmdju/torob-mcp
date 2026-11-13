@@ -21,7 +21,7 @@ flowchart LR
 What this means:
 
 - **Stateless.** Every request stands alone - no sessions, no accounts, nothing to log in to.
-- **Read-only.** All 15 tools carry `readOnlyHint`. Nothing here can change, delete or post anything, and no shop is ever contacted.
+- **Read-only.** All 16 tools carry `readOnlyHint`. Nothing here can change, delete or post anything, and no shop is ever contacted.
 - **No storage.** The only memory is a short-lived response cache (minutes, per isolate, with a 12MB byte budget so one 1.4MB details payload cannot fill the isolate) and a small map of product ids this server handed out, so a `prk` can be resolved back to its seller list. A name and details URL learned from a search also travel through the per-colo Cache API, and the filter groups a query advertised are remembered for 30 minutes. Prices are re-read from Torob every time the cache expires.
 - **Projected, not passed through.** A Torob search page is roughly 70KB of ranking metadata, experiment ids and ad plumbing. Every tool returns a compact record built by the server's projection layer instead.
 - **Rate-limit aware.** Upstream calls are serialized with a gap, retried on transient failures with backoff, and abandoned fast on a hard failure - the MCP client usually times out before a long retry loop finishes. Torob does not throttle with a 429; a caller that goes too fast gets a bot challenge, handled below.
@@ -78,7 +78,7 @@ The projection layer exists because a well-formed response can still be wrong in
 
 ## The local server
 
-Everything above runs in two places. The hosted Worker (`src/worker.ts`) and the Node entry (`src/index.ts`) share `buildServer` and the same fifteen tools; the one difference that matters is **where what a run learns is kept**.
+Everything above runs in two places. The hosted Worker (`src/worker.ts`) and the Node entry (`src/index.ts`) share `buildServer` and the same sixteen tools; the one difference that matters is **where what a run learns is kept**.
 
 - `src/store.ts` is that place, behind a single interface. On Workers it is the Cache API, which is per-colo - so the colo whose egress Torob challenged carries that fact while another colo is not punished for it. On Node a backend is installed at startup by `src/store-node.ts`.
 - The local backend writes `~/.torob-mcp/state.json`. `TOROB_MCP_HOME` moves the directory, `TOROB_MCP_STORE=off` turns the store off. It holds two things: a product's name and details URL, and the marker saying the wall is still up. Writes go through synchronously, because a lost write here is either an extra search or - worse - a fresh request spent rediscovering a wall that has not lifted.

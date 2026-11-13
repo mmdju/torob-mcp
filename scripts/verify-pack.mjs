@@ -103,8 +103,8 @@ try {
     const list = await request(2, "tools/list", {});
     if (list.error) fail("tools/list", JSON.stringify(list.error));
     const count = list.result?.tools?.length;
-    if (count !== 15) fail("tools/list", `got ${count} tools, expected 15`);
-    console.log("the installed bin answered initialize and listed 15 tools");
+    if (count !== 16) fail("tools/list", `got ${count} tools, expected 16`);
+    console.log("the installed bin answered initialize and listed 16 tools");
   } finally {
     child.stdin.end();
     child.kill();

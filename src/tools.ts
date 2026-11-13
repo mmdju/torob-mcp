@@ -1,4 +1,4 @@
-// torob-mcp tools. Fifteen read-only tools.
+// torob-mcp tools. Sixteen read-only tools.
 //
 // The split that matters: a search card shows the CHEAPEST offer only, because
 // that is the one number a shopper asks for. Every seller behind that number
