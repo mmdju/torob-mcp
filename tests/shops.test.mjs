@@ -44,6 +44,8 @@ const shopPayload = {
   block_description: "فعال",
   shop_score: 5,
   score_percentile: 0,
+  upvotes: 12,
+  downvotes: 2,
   payment_info: { items: ["امکان پرداخت در محل در همدان، تهران"] },
   delivery_info: { items: ["روش‌های ارسال: شرکت‌های پست خصوصی"] },
   customer_support_info: { schedule: "۷ روز هفته و ۲۴ ساعت شبانه روز", badges: [{ title: "تماس تلفنی" }] },
@@ -80,7 +82,14 @@ test("a shop profile reads Torob's seal, notes and link", () => {
   assert.match(profile.score_notes[1], /تخلف فروشگاه/);
   assert.equal(profile.payment[0], "امکان پرداخت در محل در همدان، تهران");
   assert.equal(profile.support.badges[0], "تماس تلفنی");
+  // The votes shoppers left on the profile travel as sent.
+  assert.deepEqual(profile.votes, { up: 12, down: 2 });
   assert.equal(profile.guarantee, "disabled");
+});
+
+test("a shop without votes carries null votes, not zeros", () => {
+  const profile = shopProfileOf({ ...shopPayload, upvotes: undefined, downvotes: undefined }, "365234");
+  assert.deepEqual(profile.votes, { up: null, down: null });
 });
 
 test("shop_profile returns the profile and, when asked, the catalogue", async () => {

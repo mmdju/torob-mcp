@@ -544,6 +544,44 @@ test("a row with a broken link does not erase the details URL the id already has
   assert.equal(searches.length, 2, "no third search was spent re-finding what was already known");
 });
 
+test("product_details passes Torob's recommended-seller flag through", async () => {
+  // Torob flags some offers with the site's own «پیشنهادی» badge. The flag
+  // travels as sent - Torob's word, not this server's judgement - and an offer
+  // without it reads as false, not undefined.
+  const id = "3f6a5c11-0000-4000-8000-bbbbbbbb0002";
+  stub((url) => {
+    if (url.includes("base-product/search")) {
+      return {
+        ...searchPayload,
+        results: [
+          {
+            ...searchPayload.results[0],
+            random_key: id,
+            more_info_url: `https://api.torob.com/v4/base-product/details/?search_id=s2&prk=${id}`,
+          },
+        ],
+      };
+    }
+    if (url.includes("/details/")) {
+      return {
+        ...detailsPayload,
+        random_key: id,
+        products_info: {
+          title: "فروشنده‌ها",
+          result: [
+            { shop_name: "پیشنهاد ترب", shop_score: 4.8, shop_votes_count: 9000, price: 50000000, availability: true, is_recommended: true, more_info: {} },
+            { shop_name: "فروشگاه دوم", shop_score: 4.0, shop_votes_count: 50, price: 52000000, availability: true, more_info: {} },
+          ],
+        },
+      };
+    }
+    return { results: [], count: 0, next: "" };
+  });
+  const out = await run("product_details", { prk: id });
+  assert.equal(out.offers[0].is_recommended, true);
+  assert.equal(out.offers[1].is_recommended, false);
+});
+
 test("an id-only answer for another product is never remembered as this one", async () => {
   // The id-only probe is the one call that can be answered by a different
   // product. Caching that answer under the probed id would serve it later

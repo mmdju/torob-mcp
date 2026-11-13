@@ -37,6 +37,8 @@ export interface Offer {
   shop_note: string | null;
   /** Torob's own ad flag for this offer. */
   is_adv: boolean;
+  /** Torob's own «پیشنهادی» flag - the site's recommended-seller badge, as sent. */
+  is_recommended: boolean;
   /** Torob's postage line as sent, e.g. "هزینه ارسال ۷۰٫۰۰۰ تومان". */
   postage_text: string | null;
   /** Postage parsed from that line; null when it is free or unstated. */
@@ -462,6 +464,8 @@ export interface ShopProfileResponse {
   last_updated: string | null;
   score: number | null;
   score_percentile: number | null;
+  /** Up/down votes shoppers left on the shop's profile; null when Torob sends none. */
+  votes: { up: number | null; down: number | null };
   /** Torob's own sentences, including any violation note. */
   score_notes: string[];
   trust_seal: { level: string | null; valid_until: string | null; notes: string[] };

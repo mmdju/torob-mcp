@@ -121,7 +121,7 @@ Returns: the card fields, plus:
 | `offers[]` | The seller list, cheapest first |
 | `offers_truncated` / `offers_returned` | More offers exist than shown |
 
-Each offer: `shop_name`, `shop_city`, `shop_id`, `shop_score` (0-5 or null), `shop_votes`, `price_toman`, `price_text`, `was_price_text` (struck-through price when discounted), `available`, `price_unreliable` (Torob's own warning), `free_shipping`, `payment_on_delivery`, `same_day_delivery`, `url` (the shop's page on torob.com), `buy_url` (Torob's own click-through, an `api.torob.com` redirect), `shop_note` (Torob's own sentence about the seller, when it sends one), `is_adv`, `postage_text` / `postage_fee_toman`, `delivered_price_toman`, `guarantee` (`enabled` / `disabled`), `installment_providers[]`, `last_price_change_date`, `has_public_torob_profile`, `shop_score_percentile`.
+Each offer: `shop_name`, `shop_city`, `shop_id`, `shop_score` (0-5 or null), `shop_votes`, `price_toman`, `price_text`, `was_price_text` (struck-through price when discounted), `available`, `price_unreliable` (Torob's own warning), `free_shipping`, `payment_on_delivery`, `same_day_delivery`, `url` (the shop's page on torob.com), `buy_url` (Torob's own click-through, an `api.torob.com` redirect), `shop_note` (Torob's own sentence about the seller, when it sends one), `is_adv`, `is_recommended` (Torob's own «پیشنهادی» badge, as sent), `postage_text` / `postage_fee_toman`, `delivered_price_toman`, `guarantee` (`enabled` / `disabled`), `installment_providers[]`, `last_price_change_date`, `has_public_torob_profile`, `shop_score_percentile`.
 
 - `postage_text` is Torob's own line ("هزینه ارسال رایگان" or a Toman amount); `postage_fee_toman` is that number parsed, `null` when postage is free or unstated, and `delivered_price_toman` is the price with it added.
 - `resolved_by: "name-search"` means the id was re-found through the product's name, not matched exactly - say so rather than presenting it as the same id.
@@ -181,7 +181,7 @@ Torob's own price chart for one product: month-by-month points, when the price l
 |---|---|---|---|
 | `prk` | string | **yes** | From a `search_products` card, or a torob.com product URL |
 | `details_url` | string | no | The `details_url` from the same card, so the id resolves with no lookup |
-| `months` | number | no | How many chart points to return, newest last (default 12, max 54). Torob's points are denser near today and vary per product - read `window.from/to` and raise this when the window is too narrow |
+| `months` | number | no | How many chart points to return, newest last (default: the whole chart, max 100 points). Torob's points are denser near today and vary per product - `window.from/to` says what the returned points cover |
 | `include_changes` | boolean | no | Also read the newest price changes. **Costs one extra upstream request** |
 | `changes_limit` | number | no | How many changes with `include_changes` (default 5, max 20) |
 
@@ -267,6 +267,7 @@ Returns the profile:
 | `website`, `logo`, `is_marketplace`, `url` | Its own site, its logo, and its torob.com page |
 | `status`, `active_since`, `active_time`, `last_updated` | Torob's own words (e.g. `"فعال"`, `"۵ ماه و ۳ هفته"`) |
 | `score`, `score_percentile` | Torob's score and where the shop sits against the rest |
+| `votes` | `{up, down}` - the votes shoppers left on the shop's profile; `null` when Torob sends none |
 | `score_notes[]` | Torob's own sentences about this shop - **including any violation note**; quote them as sent |
 | `trust_seal` | `{level, valid_until, notes[]}` - the enamad seal's level, its validity and its notes |
 | `support` | `{schedule, badges[]}` - support hours and what it offers |

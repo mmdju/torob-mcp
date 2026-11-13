@@ -2,6 +2,29 @@
 
 Releases of the service (`https://torob-mcp.mmdju3.workers.dev/mcp`) and of the code in this repository. Dates are UTC.
 
+## 0.5.11 - 2026-11-14
+
+Two signals Torob already sends and this server dropped on the floor, and one window sized for a chart Torob no longer draws. Every shape below was read off a live response the same day; two candidates died in that check and are listed at the end so nobody re-proposes them blind.
+
+### Added
+
+- **`product_details` offers now carry `is_recommended`** - Torob's own «پیشنهادی» badge, the flag the site renders beside a seller it recommends. Measured live: present on all 23 seller rows of one product's details payload (false on every row of that one; the site shows it where Torob means it). It travels as sent - Torob's word, not this server's judgement - exactly like `is_adv` beside it.
+- **`shop_profile` now carries `votes` (`{up, down}`)** - the votes shoppers left on the shop's Torob profile. Measured live: two plain numbers on the shop payload (`upvotes` / `downvotes`). A shop Torob sends no votes for carries `null`, not a zero - zero votes and no votes are different answers.
+
+### Changed
+
+- **`price_history` returns the whole chart by default, capped at 100 points** (was: 12, max 54). Two live measurements drove this. First, the chart's granularity varies per product and is denser near today - the newest 12 points of one chart covered about two weeks, which is not the stretch "is now a good time to buy?" needs. Second, the old cap of 54 cut real history off: one product's chart measured 69 points. The whole chart is fetched upstream either way and the window is sliced locally, so the wider default costs no extra request - only the ~kilobytes of a longer answer. `window.from/to` still says exactly what the returned points cover, and the note beside a truncated window now names the 100-point cap instead of telling a caller to raise a parameter already at its maximum.
+
+### Dropped after measuring
+
+- **`related_queries`** - the key exists on every search response measured, and was `null` on all four queries tried (2026-11-14). Nothing to surface; re-check if Torob starts filling it.
+- **`discount_info` on search cards** - present on every row measured and an empty array on every one of them, across four queries. The struck-through price on offers already covers what it would say.
+
+### Coverage
+
+- `tests/tools.test.mjs`: an offer flagged `is_recommended: true` travels, and one without the flag reads `false`, not undefined.
+- `tests/shops.test.mjs`: votes read through as `{up, down}`, and a shop with no votes carries nulls.
+
 ## 0.5.10 - 2026-11-14
 
 A pass over the words the server says about itself, each one checked against the live API before it was rewritten - three claims had drifted from what Torob actually does, and one memory could quietly forget what it knew.

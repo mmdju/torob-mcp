@@ -1048,8 +1048,8 @@ const priceHistoryTool: ToolDef = {
       months: {
         type: "number",
         description:
-          "How many chart points to return, newest last (default 12, max 54). Torob's points are denser near " +
-          "today and vary per product - read window.from/to in the answer and raise this when the window is too narrow.",
+          "How many chart points to return, newest last (default: the whole chart, max 100 points). Torob's points " +
+          "are denser near today and vary per product; window.from/to in the answer says what the returned points cover.",
       },
       include_changes: {
         type: "boolean",
@@ -1062,7 +1062,11 @@ const priceHistoryTool: ToolDef = {
   async run(args) {
     const prk = str(args.prk).trim();
     if (!prk) throw usageError("price_history needs a prk - the product id from a search_products card.");
-    const months = clampLimit(args.months, 12, 54);
+    // The whole chart is fetched upstream regardless, so the window is sliced
+    // locally and costs nothing extra: the default is everything Torob charts,
+    // up to the cap. The cap itself is above the longest chart measured live
+    // (69 points, 2026-11-14) - the old 54 cut real history off.
+    const months = clampLimit(args.months, 100, 100);
     const changesLimit = clampLimit(args.changes_limit, 5, 20);
     const opts = { detailsUrl: args.details_url };
 
@@ -1077,7 +1081,7 @@ const priceHistoryTool: ToolDef = {
       series: chart.series,
       ...(chart.points_available > chart.window.points
         ? {
-            window_note: `Torob holds ${chart.points_available} point(s) for this product; showing the newest ${chart.window.points}. Raise months to see more.`,
+            window_note: `Torob holds ${chart.points_available} point(s) for this product; this tool returns at most 100.`,
           }
         : {}),
       reading: priceReading(chart),

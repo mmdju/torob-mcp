@@ -63,6 +63,8 @@ export interface Offer {
   shop_note: string | null;
   /** Torob's own ad flag for this offer. */
   is_adv: boolean;
+  /** Torob's own «پیشنهادی» flag - the site's recommended-seller badge, as sent. */
+  is_recommended: boolean;
   /** Torob's postage line as sent, e.g. "هزینه ارسال ۷۰٫۰۰۰ تومان". */
   postage_text: string | null;
   /** Postage parsed from that line; null when it is free or unstated. */
@@ -154,6 +156,7 @@ interface RawOffer {
   is_price_unreliable?: unknown;
   page_url?: unknown;
   is_adv?: unknown;
+  is_recommended?: unknown;
   postage_fee?: unknown;
   guarantee_info?: unknown;
   installment?: unknown;
@@ -504,6 +507,7 @@ function toOffer(raw: RawOffer): Offer | null {
     buy_url: str(raw.page_url).startsWith("http") ? str(raw.page_url) : null,
     shop_note: scoreNoteOf(raw),
     is_adv: raw.is_adv === true,
+    is_recommended: raw.is_recommended === true,
     postage_text: postage.text,
     postage_fee_toman: postage.fee,
     delivered_price_toman: price === null ? null : price + (postage.fee ?? 0),
@@ -2000,6 +2004,11 @@ export interface ShopProfile {
   last_updated: string | null;
   score: number | null;
   score_percentile: number | null;
+  /**
+   * Up/down votes shoppers left on the shop's Torob profile (measured live
+   * 2026-11-14: two plain numbers on every shop). Null when Torob sends none.
+   */
+  votes: { up: number | null; down: number | null };
   /** Torob's own sentences about this shop, including any violation note. */
   score_notes: string[];
   trust_seal: { level: string | null; valid_until: string | null; notes: string[] };
@@ -2057,6 +2066,10 @@ export function shopProfileOf(raw: unknown, shopId: string): ShopProfile {
     last_updated: short(j.last_updated, 80),
     score: num(j.shop_score, 0) > 0 ? Math.round(num(j.shop_score, 0) * 10) / 10 : null,
     score_percentile: Number.isFinite(num(j.score_percentile, NaN)) ? Math.round(num(j.score_percentile, 0)) : null,
+    votes: {
+      up: num(j.upvotes, -1) >= 0 ? Math.round(num(j.upvotes, 0)) : null,
+      down: num(j.downvotes, -1) >= 0 ? Math.round(num(j.downvotes, 0)) : null,
+    },
     score_notes: stringsOf(j.score_info, 5, 200),
     trust_seal: {
       level: short(j.enamad_level, 60),
