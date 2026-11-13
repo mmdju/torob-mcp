@@ -54,6 +54,12 @@ The hosted demo endpoint is **keyless and read-only**, so it sends `Access-Contr
   (or the explicitly configured relay). URLs containing credentials are refused.
   Redirects are never followed, and response bodies are streamed with a 6 MiB
   ceiling, independent of Content-Length. Limit and redirect failures are not retried.
+- Merchant text is capped and stripped of control, bidi and zero-width tricks
+  while preserving Persian ZWNJ. It remains untrusted data, never instructions
+  for this assistant or its other tools. Sanitization cannot prevent prose-based
+  prompt injection. Purchase links accept only Torob's HTTPS buy-button redirect,
+  without credentials or non-default ports; they still carry Torob's tracking
+  parameters and are returned for browser navigation, never fetched by this server.
 
 - Every tool **advertises** a closed schema (`additionalProperties: false`, added when the tool list is served), which is what tells a client what is accepted. The server itself coerces every argument rather than trusting its type, and validates the ones where a wrong value would silently change an answer: filter slugs and values against the groups that search really accepts, price bounds against each other, pages and limits clamped, URLs parsed rather than followed. An unknown property is ignored, not acted on.
 - All arguments are coerced from unknown input, never trusted.

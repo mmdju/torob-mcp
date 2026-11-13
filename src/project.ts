@@ -31,6 +31,7 @@ import {
   str,
   toman,
   tomanFromText,
+  torobBuyUrl,
 } from "./normalize.js";
 
 /** One seller offer for a product. */
@@ -485,7 +486,9 @@ function toOffer(raw: RawOffer): Offer | null {
   const postage = postageOf(raw);
   const guarantee = short((raw.guarantee_info as { status?: unknown } | null | undefined)?.status, 20);
   const percentile = num(raw.shop_score_percentile, NaN);
-  const shopId = str(raw.shop_id).trim();
+  const rawShopId = str(raw.shop_id).trim();
+  const shopId = /^\d+$/.test(rawShopId) ? rawShopId : "";
+  const buyUrl = torobBuyUrl(raw.page_url);
   return {
     shop_name: shop,
     shop_city: short(raw.shop_name2, 60),
@@ -504,8 +507,8 @@ function toOffer(raw: RawOffer): Offer | null {
     // button uses is an api.torob.com redirect with ~400 characters of tracking
     // around its session id, so it travels as `buy_url` and never as the shop's
     // address.
-    url: shopId ? `https://torob.com/shop/${shopId}/` : (str(raw.page_url).startsWith("http") ? str(raw.page_url) : null),
-    buy_url: str(raw.page_url).startsWith("http") ? str(raw.page_url) : null,
+    url: shopId ? `https://torob.com/shop/${shopId}/` : buyUrl,
+    buy_url: buyUrl,
     shop_note: scoreNoteOf(raw),
     is_adv: raw.is_adv === true,
     is_recommended: raw.is_recommended === true,

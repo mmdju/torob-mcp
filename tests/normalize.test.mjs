@@ -14,6 +14,7 @@ import {
   str,
   toman,
   tomanFromText,
+  torobBuyUrl,
 } from "../dist/normalize.js";
 
 test("foldKey makes the same words compare equal across keyboards", () => {
@@ -34,6 +35,23 @@ test("str keeps strings and falls back for anything else", () => {
   assert.equal(str(null, "x"), "x");
   assert.equal(str(undefined, "x"), "x");
   assert.equal(str({}, "x"), "x");
+});
+
+test("merchant text drops invisible controls but preserves Persian joiners", () => {
+  const hidden = String.fromCodePoint(0x202e, 0x2066, 0x200b, 0xfeff, 0x0000);
+  const zwnj = String.fromCodePoint(0x200c);
+  assert.equal(short(`گوشی${hidden} سامسونگ`), "گوشی سامسونگ");
+  assert.equal(short(`نیم${zwnj}فاصله`), `نیم${zwnj}فاصله`);
+  assert.equal(short("first\nsecond\tthird"), "first second third");
+  assert.equal(short("a".repeat(100), 20).length, 20);
+});
+
+test("buy links accept only the known Torob HTTPS redirect", () => {
+  const good = "https://api.torob.com/v4/product-page/redirect/?prk=example&btn=buy";
+  assert.equal(torobBuyUrl(good), good);
+  for (const bad of [null, "http://api.torob.com/v4/product-page/redirect/", "https://attacker.example/", "https://user:pass@api.torob.com/v4/product-page/redirect/", "https://api.torob.com:444/v4/product-page/redirect/", "https://api.torob.com/v4/user/logout/"]) {
+    assert.equal(torobBuyUrl(bad), null);
+  }
 });
 
 test("str coerces a numeric id, because Torob sends ids both ways", () => {
