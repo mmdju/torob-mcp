@@ -5,6 +5,12 @@ on:
     - cron: "23 * * * *"
   workflow_dispatch:
 
+# The hourly cadence never overlaps a finished run; this keeps a manual or
+# slow run from racing the next hour's start.
+concurrency:
+  group: live-verify
+  cancel-in-progress: false
+
 jobs:
   # A red badge must mean "broken". The endpoint checks (health, version,
   # landing, handshake, tools/list) do not touch Torob's edge at all, so a red
@@ -12,6 +18,7 @@ jobs:
   # but a challenge is reported without failing the run - see the script.
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
